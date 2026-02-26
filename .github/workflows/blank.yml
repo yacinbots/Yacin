@@ -9,6 +9,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
+
       - name: Install dependencies
         run: |
           sudo apt update
@@ -17,50 +18,46 @@ jobs:
       - name: Setup SSH
         run: |
           sudo mkdir -p /var/run/sshd
-          echo 'root:Admin@123' | sudo chpasswd
-          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          echo root:Admin@123 | sudo chpasswd
+          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' /etc/ssh/sshd_config
+          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' /etc/ssh/sshd_config
           sudo service ssh restart
 
       - name: Install Xray
-        run: sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" install
+        run: |
+          sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" install
 
       - name: Generate UUID
-        run: echo "UUID=$(cat /proc/sys/kernel/random/uuid)" >> $GITHUB_ENV
-
-      - name: Configure Xray
         run: |
-          sudo tee /usr/local/etc/xray/config.json > /dev/null << 'EOF'
-{
-  "inbounds": [
-    {
-      "port": 10000,
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "UUID_PLACEHOLDER"
-          }
-        ],
-        "decryption": "none"
-      },
-      "streamSettings": {
-        "network": "ws",
-        "wsSettings": {
-          "path": "/dark"
-        }
-      }
-    }
-  ],
-  "outbounds": [
-    {
-      "protocol": "freedom"
-    }
-  ]
-}
-EOF
+          echo "UUID=$(cat /proc/sys/kernel/random/uuid)" >> $GITHUB_ENV
 
-          sudo sed -i "s/UUID_PLACEHOLDER/$UUID/g" /usr/local/etc/xray/config.json
+      - name: Create Xray config
+        run: |
+          sudo rm -f /usr/local/etc/xray/config.json
+          echo '{' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"inbounds": [' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '{' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"port": 10000,' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"protocol": "vless",' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"settings": {' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"clients": [' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '{ "id": "'"$UUID"'" }' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '],' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"decryption": "none"' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '},' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"streamSettings": {' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"network": "ws",' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"wsSettings": {' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"path": "/dark"' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '}' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '}' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '}' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '],' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"outbounds": [{' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '"protocol": "freedom"' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '}]' | sudo tee -a /usr/local/etc/xray/config.json
+          echo '}' | sudo tee -a /usr/local/etc/xray/config.json
+
           sudo systemctl restart xray
           sudo systemctl enable xray
 
@@ -68,21 +65,19 @@ EOF
         run: |
           curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
           unzip ngrok.zip
-          sudo mv ngrok /usr/local/bin/
+          sudo mv ngrok /usr/local/bin/ngrok
           ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
 
-      - name: Start ngrok
+      - name: Start tunnel
         run: |
           ngrok tcp 10000 > ngrok.log &
           sleep 10
-
-          tunnel=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | sed 's/tcp:\/\///')
-
-          HOST=$(echo $tunnel | cut -d: -f1)
-          PORT=$(echo $tunnel | cut -d: -f2)
+          TUNNEL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep tcp:// | cut -d '"' -f4 | sed 's/tcp:\/\///')
+          HOST=$(echo $TUNNEL | cut -d: -f1)
+          PORT=$(echo $TUNNEL | cut -d: -f2)
 
           echo "================================"
-          echo " VPS READY"
+          echo "VPS READY"
           echo "================================"
           echo "Host: $HOST"
           echo "Port: $PORT"
@@ -94,4 +89,8 @@ EOF
           echo "================================"
 
       - name: Keep alive
-        run: while true; do sleep 300; done
+        run: |
+          while true
+          do
+            sleep 300
+          done
