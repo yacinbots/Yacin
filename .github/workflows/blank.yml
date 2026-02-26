@@ -9,7 +9,6 @@ jobs:
     timeout-minutes: 360
 
     steps:
-
       - name: Install dependencies
         run: |
           sudo apt update
@@ -24,16 +23,14 @@ jobs:
           sudo service ssh restart
 
       - name: Install Xray
-        run: |
-          sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" install
+        run: sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" install
 
       - name: Generate UUID
-        run: |
-          echo "UUID=$(cat /proc/sys/kernel/random/uuid)" >> $GITHUB_ENV
+        run: echo "UUID=$(cat /proc/sys/kernel/random/uuid)" >> $GITHUB_ENV
 
       - name: Configure Xray
         run: |
-          sudo tee /usr/local/etc/xray/config.json > /dev/null <<EOF
+          sudo tee /usr/local/etc/xray/config.json > /dev/null << 'EOF'
 {
   "inbounds": [
     {
@@ -42,7 +39,7 @@ jobs:
       "settings": {
         "clients": [
           {
-            "id": "${UUID}"
+            "id": "UUID_PLACEHOLDER"
           }
         ],
         "decryption": "none"
@@ -63,6 +60,7 @@ jobs:
 }
 EOF
 
+          sudo sed -i "s/UUID_PLACEHOLDER/$UUID/g" /usr/local/etc/xray/config.json
           sudo systemctl restart xray
           sudo systemctl enable xray
 
@@ -73,9 +71,9 @@ EOF
           sudo mv ngrok /usr/local/bin/
           ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
 
-      - name: Start ngrok tunnel
+      - name: Start ngrok
         run: |
-          ngrok tcp 10000 --log stdout > ngrok.log &
+          ngrok tcp 10000 > ngrok.log &
           sleep 10
 
           tunnel=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | sed 's/tcp:\/\///')
@@ -83,24 +81,17 @@ EOF
           HOST=$(echo $tunnel | cut -d: -f1)
           PORT=$(echo $tunnel | cut -d: -f2)
 
-          echo "======================================"
-          echo " VPS READY "
-          echo "======================================"
-          echo "SSH LOGIN"
+          echo "================================"
+          echo " VPS READY"
+          echo "================================"
           echo "Host: $HOST"
           echo "Port: $PORT"
           echo "User: root"
           echo "Pass: Admin@123"
-          echo ""
-          echo "VLESS CONFIG"
-          echo "Address: $HOST"
-          echo "Port: $PORT"
-          echo "UUID: ${UUID}"
+          echo "UUID: $UUID"
           echo "Path: /dark"
           echo "Network: ws"
-          echo "TLS: off"
-          echo "======================================"
+          echo "================================"
 
-      - name: Keep VPS alive
-        run: |
-          while true; do sleep 300; done
+      - name: Keep alive
+        run: while true; do sleep 300; done
