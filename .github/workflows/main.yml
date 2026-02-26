@@ -1,41 +1,52 @@
-name: VPS Live Quran Broadcast
+name: Free VPS via ngrok SSH
+
 on:
   workflow_dispatch:
 
 jobs:
-  live-quran:
+  vps:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: Install Dependencies
+      - name: Install SSH and tools
         run: |
-          sudo apt update -y
-          sudo apt install -y wget ffmpeg curl
+          sudo apt update
+          sudo apt install -y openssh-server curl unzip sudo
 
-      - name: Download Quran Audio Files
+      - name: Set root password
         run: |
-          sudo mkdir -p /root/quran
-          for i in $(seq -f "%03g" 1 14); do
-            sudo wget -O /root/quran/$i.mp3 https://server12.mp3quran.net/maher/Almusshaf-Al-Mojawwad/$i.mp3
-          done
-          sudo ls -lh /root/quran
+          echo "root:root123" | sudo chpasswd
 
-      - name: Download Background Image
+      - name: Enable root login
         run: |
-          sudo wget -O /root/quran/bg.jpg https://b.top4top.io/p_3709p4xqb0.jpg
+          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo service ssh restart
 
-      - name: Start Live Broadcast
+      - name: Install ngrok
         run: |
-          echo "Starting random Quran live broadcast..."
-          while true; do
-            # pick random audio
-            file=$(ls /root/quran/*.mp3 | shuf -n 1)
-            echo "Now playing: $file"
-            
-            # broadcast with ffmpeg
-            ffmpeg -loop 1 -i /root/quran/bg.jpg -i "$file" \
-              -c:v libx264 -preset veryfast -tune stillimage -c:a aac -b:a 128k \
-              -pix_fmt yuv420p -shortest \
-              -f flv rtmps://live-api-s.facebook.com:443/rtmp/FB-122193418094584587-0-Ab4PZHhFBDkiOdKBBbZ_CwwV
-          done
+          curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
+          unzip ngrok.zip
+          sudo mv ngrok /usr/local/bin
+
+      - name: Set ngrok token
+        run: |
+          ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
+
+      - name: Start ngrok SSH tunnel
+        run: |
+          ngrok tcp 22 &
+          sleep 10
+
+      - name: Show SSH connection info
+        run: |
+          curl -s http://127.0.0.1:4040/api/tunnels
+
+      - name: Keep VPS alive
+        run: |
+          echo "VPS is ready"
+          echo "User: root"
+          echo "Pass: root123"
+          while true; do sleep 60; done
