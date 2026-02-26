@@ -1,52 +1,63 @@
-name: Free VPS via ngrok SSH
+name: Ubuntu VPS via Ngrok SSH
 
-on:
-  workflow_dispatch:
+on: [push]
 
 jobs:
-  vps:
+  vps-setup:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: Install SSH and tools
-        run: |
-          sudo apt update
-          sudo apt install -y openssh-server curl unzip sudo
 
-      - name: Set root password
-        run: |
-          echo "root:root123" | sudo chpasswd
+    - name: Install SSH and dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y openssh-server curl unzip sudo
 
-      - name: Enable root login
-        run: |
-          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo service ssh restart
+    - name: Configure SSH
+      run: |
+        sudo mkdir -p /var/run/sshd
+        echo 'root:Admin@123' | sudo chpasswd
 
-      - name: Install ngrok
-        run: |
-          curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
-          unzip ngrok.zip
-          sudo mv ngrok /usr/local/bin
+        sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+        sudo sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+        sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
-      - name: Set ngrok token
-        run: |
-          ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
+        sudo service ssh restart
 
-      - name: Start ngrok SSH tunnel
-        run: |
-          ngrok tcp 22 &
-          sleep 10
+    - name: Download and install ngrok
+      run: |
+        curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
+        unzip ngrok.zip
+        sudo mv ngrok /usr/local/bin/
+        ngrok version
 
-      - name: Show SSH connection info
-        run: |
-          curl -s http://127.0.0.1:4040/api/tunnels
+    - name: Authenticate ngrok
+      run: |
+        ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
 
-      - name: Keep VPS alive
-        run: |
-          echo "VPS is ready"
-          echo "User: root"
-          echo "Pass: root123"
-          while true; do sleep 60; done
+    - name: Start ngrok tunnel
+      run: |
+        ngrok tcp 22 --log stdout > ngrok.log &
+        sleep 10
+
+        tunnel=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | sed 's/tcp:\/\///')
+
+        if [ -z "$tunnel" ]; then
+          echo "ERROR: Tunnel not created"
+          cat ngrok.log
+          exit 1
+        fi
+
+        echo "============================================"
+        echo "         VPS SSH CONNECTION DETAILS        "
+        echo "============================================"
+        echo "Host: $(echo $tunnel | cut -d: -f1)"
+        echo "Port: $(echo $tunnel | cut -d: -f2)"
+        echo "User: root"
+        echo "Password: Admin@123"
+        echo "============================================"
+
+    - name: Keep VPS Alive
+      run: |
+        while true; do sleep 300; done
