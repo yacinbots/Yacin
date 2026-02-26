@@ -22,19 +22,18 @@ jobs:
       - name: Download Quran Files
         run: |
           sudo mkdir -p /root/quran
-          cd /root/quran
 
-          sudo wget -O 002.mp3 https://server6.mp3quran.net/qtm/002.mp3
-          sudo wget -O 003.mp3 https://server6.mp3quran.net/qtm/003.mp3
+          sudo wget -O /root/quran/002.mp3 https://server6.mp3quran.net/qtm/002.mp3
+          sudo wget -O /root/quran/003.mp3 https://server6.mp3quran.net/qtm/003.mp3
 
           echo "✅ Files downloaded:"
-          ls -lh /root/quran
+          sudo ls -lh /root/quran
 
       - name: Install Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=vps-${{ github.run_id }}
-          tsIP=$(tailscale ip -4 | head -n 1)
+          tsIP=$(sudo tailscale ip -4 | head -n 1)
           echo "TAILSCALE_IP=$tsIP" >> $GITHUB_ENV
           echo "✅ Tailscale IP: $tsIP"
 
@@ -45,9 +44,11 @@ jobs:
           echo "User: root"
           echo "Pass: admin@123"
           echo "Files location: /root/quran"
+          sudo ls -lh /root/quran
 
       - name: Keep VPS Alive
         run: |
+          echo "✅ VPS is running and ready"
           while true; do
             echo "[$(date)] VPS running..."
             sleep 300
