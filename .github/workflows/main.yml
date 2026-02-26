@@ -23,9 +23,9 @@ jobs:
         sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
         sudo service ssh restart
 
-    - name: Install Xray
+    - name: Install Xray (FIXED WITH SUDO)
       run: |
-        bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" install
+        sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" install
 
     - name: Generate UUID
       run: |
@@ -33,35 +33,35 @@ jobs:
 
     - name: Configure Xray
       run: |
-        sudo bash -c "cat > /usr/local/etc/xray/config.json" <<EOL
-        {
-          "inbounds": [
-            {
-              "port": 10000,
-              "protocol": "vless",
-              "settings": {
-                "clients": [
-                  {
-                    "id": "$UUID"
-                  }
-                ],
-                "decryption": "none"
-              },
-              "streamSettings": {
-                "network": "ws",
-                "wsSettings": {
-                  "path": "/dark"
-                }
-              }
-            }
-          ],
-          "outbounds": [
-            {
-              "protocol": "freedom"
-            }
-          ]
+        sudo tee /usr/local/etc/xray/config.json > /dev/null <<EOF
+{
+  "inbounds": [
+    {
+      "port": 10000,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "$UUID"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "wsSettings": {
+          "path": "/dark"
         }
-        EOL
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom"
+    }
+  ]
+}
+EOF
 
         sudo systemctl restart xray
 
@@ -72,34 +72,39 @@ jobs:
         sudo mv ngrok /usr/local/bin/
         ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
 
-    - name: Start ngrok
+    - name: Start ngrok and show config
       run: |
         ngrok tcp 10000 --log stdout > ngrok.log &
-        sleep 10
+        sleep 12
 
         tunnel=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | sed 's/tcp:\/\///')
 
         HOST=$(echo $tunnel | cut -d: -f1)
         PORT=$(echo $tunnel | cut -d: -f2)
 
+        echo ""
         echo "======================================"
-        echo " VPS READY "
+        echo " VPS SSH READY "
         echo "======================================"
-        echo "SSH:"
         echo "Host: $HOST"
         echo "Port: $PORT"
         echo "User: root"
         echo "Pass: Admin@123"
         echo ""
-        echo "VLESS:"
+        echo "======================================"
+        echo " VLESS CONFIG "
+        echo "======================================"
         echo "Address: $HOST"
         echo "Port: $PORT"
         echo "UUID: $UUID"
-        echo "Path: /dark"
         echo "Network: ws"
+        echo "Path: /dark"
         echo "TLS: off"
+        echo ""
+        echo "VLESS LINK:"
+        echo "vless://$UUID@$HOST:$PORT?type=ws&path=%2Fdark&security=none#DarkTunnel"
         echo "======================================"
 
-    - name: Keep alive
+    - name: Keep VPS alive
       run: |
         while true; do sleep 300; done
