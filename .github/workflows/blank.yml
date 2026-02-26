@@ -18,9 +18,11 @@ jobs:
       - name: Setup SSH
         run: |
           sudo mkdir -p /var/run/sshd
-          echo root:Admin@123 | sudo chpasswd
-          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' /etc/ssh/sshd_config
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+          echo 'root:Admin@123' | sudo chpasswd
+
+          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
           sudo service ssh restart
 
       - name: Install Xray
@@ -31,32 +33,37 @@ jobs:
         run: |
           echo "UUID=$(cat /proc/sys/kernel/random/uuid)" >> $GITHUB_ENV
 
-      - name: Create Xray config
+      - name: Configure Xray
         run: |
-          sudo rm -f /usr/local/etc/xray/config.json
-          echo '{' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"inbounds": [' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '{' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"port": 10000,' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"protocol": "vless",' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"settings": {' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"clients": [' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '{ "id": "'"$UUID"'" }' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '],' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"decryption": "none"' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '},' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"streamSettings": {' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"network": "ws",' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"wsSettings": {' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"path": "/dark"' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '}' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '}' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '}' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '],' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"outbounds": [{' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '"protocol": "freedom"' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '}]' | sudo tee -a /usr/local/etc/xray/config.json
-          echo '}' | sudo tee -a /usr/local/etc/xray/config.json
+          sudo tee /usr/local/etc/xray/config.json > /dev/null << EOF
+{
+  "inbounds": [
+    {
+      "port": 10000,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "$UUID"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "wsSettings": {
+          "path": "/dark"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom"
+    }
+  ]
+}
+EOF
 
           sudo systemctl restart xray
           sudo systemctl enable xray
@@ -66,31 +73,51 @@ jobs:
           curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
           unzip ngrok.zip
           sudo mv ngrok /usr/local/bin/ngrok
+
           ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
 
-      - name: Start tunnel
+      - name: Start ngrok tunnel
         run: |
-          ngrok tcp 10000 > ngrok.log &
-          sleep 10
-          TUNNEL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep tcp:// | cut -d '"' -f4 | sed 's/tcp:\/\///')
-          HOST=$(echo $TUNNEL | cut -d: -f1)
-          PORT=$(echo $TUNNEL | cut -d: -f2)
+          ngrok tcp 10000 --log=stdout > ngrok.log &
+          sleep 15
 
+          TUNNEL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep public_url | head -n1 | cut -d '"' -f4)
+
+          HOST=$(echo $TUNNEL | sed 's/tcp:\/\///' | cut -d: -f1)
+          PORT=$(echo $TUNNEL | sed 's/tcp:\/\///' | cut -d: -f2)
+
+          if [ -z "$HOST" ]; then
+            echo "NGROK FAILED"
+            cat ngrok.log
+            exit 1
+          fi
+
+          echo ""
           echo "================================"
-          echo "VPS READY"
+          echo " VPS READY"
           echo "================================"
+          echo ""
+          echo "SSH CONNECTION:"
           echo "Host: $HOST"
           echo "Port: $PORT"
           echo "User: root"
           echo "Pass: Admin@123"
+          echo ""
+
+          echo "VLESS CONFIG:"
+          echo "Address: $HOST"
+          echo "Port: $PORT"
           echo "UUID: $UUID"
           echo "Path: /dark"
           echo "Network: ws"
+          echo "TLS: off"
+          echo ""
+
+          echo "VLESS URL:"
+          echo "vless://$UUID@$HOST:$PORT?type=ws&path=%2Fdark&security=none#$HOST"
+          echo ""
           echo "================================"
 
-      - name: Keep alive
+      - name: Keep VPS alive
         run: |
-          while true
-          do
-            sleep 300
-          done
+          while true; do sleep 300; done
