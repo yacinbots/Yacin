@@ -1,55 +1,41 @@
-name: VPS
+name: VPS Live Quran Broadcast
 on:
   workflow_dispatch:
 
 jobs:
-  secure-vps:
+  live-quran:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: Install & Configure SSH
+      - name: Install Dependencies
         run: |
           sudo apt update -y
-          sudo apt install -y openssh-server wget curl
-          sudo systemctl enable ssh
-          sudo systemctl start ssh
-          echo "root:admin@123" | sudo chpasswd
-          echo "PermitRootLogin yes" | sudo tee -a /etc/ssh/sshd_config
-          sudo service ssh restart
-          echo "✅ SSH user: root | pass: admin@123"
+          sudo apt install -y wget ffmpeg curl
 
-      - name: Download Quran Files
+      - name: Download Quran Audio Files
         run: |
           sudo mkdir -p /root/quran
-
-          sudo wget -O /root/quran/002.mp3 https://server6.mp3quran.net/qtm/002.mp3
-          sudo wget -O /root/quran/003.mp3 https://server6.mp3quran.net/qtm/003.mp3
-
-          echo "✅ Files downloaded:"
+          for i in $(seq -f "%03g" 1 14); do
+            sudo wget -O /root/quran/$i.mp3 https://server12.mp3quran.net/maher/Almusshaf-Al-Mojawwad/$i.mp3
+          done
           sudo ls -lh /root/quran
 
-      - name: Install Tailscale
+      - name: Download Background Image
         run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=vps-${{ github.run_id }}
-          tsIP=$(sudo tailscale ip -4 | head -n 1)
-          echo "TAILSCALE_IP=$tsIP" >> $GITHUB_ENV
-          echo "✅ Tailscale IP: $tsIP"
+          sudo wget -O /root/quran/bg.jpg https://b.top4top.io/p_3709p4xqb0.jpg
 
-      - name: Verify SSH Access
+      - name: Start Live Broadcast
         run: |
-          echo "Tailscale VPS ready!"
-          echo "IP: $TAILSCALE_IP"
-          echo "User: root"
-          echo "Pass: admin@123"
-          echo "Files location: /root/quran"
-          sudo ls -lh /root/quran
-
-      - name: Keep VPS Alive
-        run: |
-          echo "✅ VPS is running and ready"
+          echo "Starting random Quran live broadcast..."
           while true; do
-            echo "[$(date)] VPS running..."
-            sleep 300
+            # pick random audio
+            file=$(ls /root/quran/*.mp3 | shuf -n 1)
+            echo "Now playing: $file"
+            
+            # broadcast with ffmpeg
+            ffmpeg -loop 1 -i /root/quran/bg.jpg -i "$file" \
+              -c:v libx264 -preset veryfast -tune stillimage -c:a aac -b:a 128k \
+              -pix_fmt yuv420p -shortest \
+              -f flv rtmps://live-api-s.facebook.com:443/rtmp/FB-122193418094584587-0-Ab4PZHhFBDkiOdKBBbZ_CwwV
           done
