@@ -1,6 +1,7 @@
 name: Ubuntu VPS + VLESS via Ngrok
 
-on: [push]
+on:
+  push:
 
 jobs:
   vps-setup:
@@ -26,40 +27,41 @@ jobs:
       run: |
         bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" install
 
-    - name: Configure Xray VLESS WS
+    - name: Generate UUID
       run: |
-        UUID=$(cat /proc/sys/kernel/random/uuid)
-        echo "UUID=$UUID" >> $GITHUB_ENV
+        echo "UUID=$(cat /proc/sys/kernel/random/uuid)" >> $GITHUB_ENV
 
-        sudo tee /usr/local/etc/xray/config.json > /dev/null <<EOF
-{
-  "inbounds": [
-    {
-      "port": 10000,
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "$UUID"
-          }
-        ],
-        "decryption": "none"
-      },
-      "streamSettings": {
-        "network": "ws",
-        "wsSettings": {
-          "path": "/dark"
+    - name: Configure Xray
+      run: |
+        sudo bash -c "cat > /usr/local/etc/xray/config.json" <<EOL
+        {
+          "inbounds": [
+            {
+              "port": 10000,
+              "protocol": "vless",
+              "settings": {
+                "clients": [
+                  {
+                    "id": "$UUID"
+                  }
+                ],
+                "decryption": "none"
+              },
+              "streamSettings": {
+                "network": "ws",
+                "wsSettings": {
+                  "path": "/dark"
+                }
+              }
+            }
+          ],
+          "outbounds": [
+            {
+              "protocol": "freedom"
+            }
+          ]
         }
-      }
-    }
-  ],
-  "outbounds": [
-    {
-      "protocol": "freedom"
-    }
-  ]
-}
-EOF
+        EOL
 
         sudo systemctl restart xray
 
@@ -70,7 +72,7 @@ EOF
         sudo mv ngrok /usr/local/bin/
         ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
 
-    - name: Start ngrok (single tunnel)
+    - name: Start ngrok
       run: |
         ngrok tcp 10000 --log stdout > ngrok.log &
         sleep 10
@@ -81,23 +83,21 @@ EOF
         PORT=$(echo $tunnel | cut -d: -f2)
 
         echo "======================================"
-        echo " VPS + VLESS READY "
+        echo " VPS READY "
         echo "======================================"
-        echo ""
-        echo "SSH CONNECTION:"
+        echo "SSH:"
         echo "Host: $HOST"
         echo "Port: $PORT"
         echo "User: root"
         echo "Pass: Admin@123"
         echo ""
-        echo "VLESS CONFIG:"
+        echo "VLESS:"
         echo "Address: $HOST"
         echo "Port: $PORT"
         echo "UUID: $UUID"
-        echo "Network: ws"
         echo "Path: /dark"
+        echo "Network: ws"
         echo "TLS: off"
-        echo ""
         echo "======================================"
 
     - name: Keep alive
