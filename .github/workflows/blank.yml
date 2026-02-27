@@ -34,7 +34,7 @@ jobs:
       - name: Configure Xray
         run: |
           sudo mkdir -p /usr/local/etc/xray
-          sudo tee /usr/local/etc/xray/config.json > /dev/null << EOF
+          cat << 'EOF' | sudo tee /usr/local/etc/xray/config.json > /dev/null
 {
   "inbounds": [
     {
