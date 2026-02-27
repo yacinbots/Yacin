@@ -4,7 +4,7 @@ on:
   push:
 
 jobs:
-  vps-setup:
+  vps:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -18,7 +18,7 @@ jobs:
       - name: Setup SSH
         run: |
           sudo mkdir -p /var/run/sshd
-          echo 'root:Admin@123' | sudo chpasswd
+          echo root:Admin@123 | sudo chpasswd
 
           sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
@@ -31,11 +31,14 @@ jobs:
 
       - name: Generate UUID
         run: |
-          echo "UUID=$(cat /proc/sys/kernel/random/uuid)" >> $GITHUB_ENV
+          UUID=$(cat /proc/sys/kernel/random/uuid)
+          echo "UUID=$UUID" >> $GITHUB_ENV
 
-      - name: Configure Xray
+      - name: Write Xray config
         run: |
-          sudo tee /usr/local/etc/xray/config.json > /dev/null << EOF
+          sudo mkdir -p /usr/local/etc/xray
+
+          sudo bash -c "cat > /usr/local/etc/xray/config.json" << EOF
 {
   "inbounds": [
     {
@@ -71,53 +74,39 @@ EOF
       - name: Install ngrok
         run: |
           curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
-          unzip ngrok.zip
+          unzip -o ngrok.zip
           sudo mv ngrok /usr/local/bin/ngrok
 
           ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
 
-      - name: Start ngrok tunnel
+      - name: Start tunnel
         run: |
-          ngrok tcp 10000 --log=stdout > ngrok.log &
+          ngrok tcp 10000 > ngrok.log &
           sleep 15
 
-          TUNNEL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep public_url | head -n1 | cut -d '"' -f4)
+          URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep public_url | cut -d '"' -f4)
 
-          HOST=$(echo $TUNNEL | sed 's/tcp:\/\///' | cut -d: -f1)
-          PORT=$(echo $TUNNEL | sed 's/tcp:\/\///' | cut -d: -f2)
+          HOST=$(echo $URL | sed 's/tcp:\/\///' | cut -d: -f1)
+          PORT=$(echo $URL | sed 's/tcp:\/\///' | cut -d: -f2)
 
-          if [ -z "$HOST" ]; then
-            echo "NGROK FAILED"
-            cat ngrok.log
-            exit 1
-          fi
-
-          echo ""
           echo "================================"
-          echo " VPS READY"
+          echo "VPS READY"
           echo "================================"
-          echo ""
-          echo "SSH CONNECTION:"
           echo "Host: $HOST"
           echo "Port: $PORT"
           echo "User: root"
           echo "Pass: Admin@123"
           echo ""
-
-          echo "VLESS CONFIG:"
-          echo "Address: $HOST"
-          echo "Port: $PORT"
           echo "UUID: $UUID"
           echo "Path: /dark"
           echo "Network: ws"
-          echo "TLS: off"
           echo ""
-
           echo "VLESS URL:"
-          echo "vless://$UUID@$HOST:$PORT?type=ws&path=%2Fdark&security=none#$HOST"
-          echo ""
+          echo "vless://$UUID@$HOST:$PORT?type=ws&path=%2Fdark&security=none"
           echo "================================"
 
-      - name: Keep VPS alive
+      - name: Keep alive
         run: |
-          while true; do sleep 300; done
+          while true; do
+            sleep 300
+          done
