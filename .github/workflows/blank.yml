@@ -34,7 +34,7 @@ jobs:
       - name: Configure Xray
         run: |
           sudo mkdir -p /usr/local/etc/xray
-          cat << 'EOF' | sudo tee /usr/local/etc/xray/config.json > /dev/null
+          sudo bash -c 'cat > /usr/local/etc/xray/config.json << EOF
 {
   "inbounds": [
     {
@@ -43,7 +43,7 @@ jobs:
       "settings": {
         "clients": [
           {
-            "id": "$UUID"
+            "id": "'"$UUID"'"
           }
         ],
         "decryption": "none"
@@ -62,7 +62,7 @@ jobs:
     }
   ]
 }
-EOF
+EOF'
           sudo systemctl restart xray
           sudo systemctl enable xray
 
