@@ -18,215 +18,102 @@ jobs:
 
       - name: إعداد وتشغيل SSH
         run: |
-          # إنشاء مجلد SSH
           sudo mkdir -p /var/run/sshd
-
-          # تغيير كلمة مرور root
           echo "root:Admin@123" | sudo chpasswd
-
-          # السماح بتسجيل الدخول بكلمة المرور
           sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
           sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-
-          # إعادة تشغيل خدمة SSH
           sudo service ssh restart
-          echo "✅ تم تشغيل SSH بنجاح"
+          echo "✅ SSH جاهز"
 
-      - name: إنشاء مجلد للملفات الصوتية
+      - name: إنشاء مجلد للملفات
         run: |
           mkdir -p ~/quran-audio
           cd ~/quran-audio
-          echo "📁 تم إنشاء مجلد quran-audio"
+          echo "📁 مجلق quran-audio"
 
       - name: تحميل ملفات الصوت
         run: |
           cd ~/quran-audio
           BASE_URL="https://server12.mp3quran.net/maher/Almusshaf-Al-Mo-lim"
           
-          echo "==========================================="
-          echo "بدء تحميل الملفات المتوفرة..."
-          echo "==========================================="
-          
-          # تحميل الملف الأول
-          echo "📥 تحميل: 001.mp3"
+          echo "📥 تحميل 001.mp3"
           wget -q --show-progress "${BASE_URL}/001.mp3" -O "001.mp3"
           
-          # تحميل الملفات من 078 إلى 114
           for i in $(seq 78 114); do
             if [ $i -lt 100 ]; then
-              FILE_NUM="0${i}"
+              NUM="0${i}"
             else
-              FILE_NUM="${i}"
+              NUM="${i}"
             fi
-            
-            echo "📥 تحميل: ${FILE_NUM}.mp3"
-            wget -q --show-progress "${BASE_URL}/${FILE_NUM}.mp3" -O "${FILE_NUM}.mp3"
+            echo "📥 تحميل ${NUM}.mp3"
+            wget -q --show-progress "${BASE_URL}/${NUM}.mp3" -O "${NUM}.mp3"
             sleep 1
           done
           
-          echo ""
-          echo "✅ تم تحميل 38 ملف بنجاح"
-          echo "📊 الحجم الإجمالي: $(du -sh ~/quran-audio/ | cut -f1)"
+          echo "✅ تم تحميل 38 ملف"
 
-      - name: تثبيت وتشغيل ngrok
+      - name: تثبيت ngrok
         run: |
-          # تحميل وتثبيت ngrok
           curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
           unzip -o ngrok.zip
           sudo mv ngrok /usr/local/bin/ngrok
-          
-          # إضافة التوكن
           ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
-          
-          echo "✅ تم تثبيت ngrok"
+          echo "✅ ngrok مثبت"
 
-      - name: تشغيل أنفاق ngrok
+      - name: تشغيل الأنفاق
         run: |
-          # تشغيل نفق SSH (المنفذ 22)
-          echo "🚇 تشغيل نفق SSH على المنفذ 22..."
-          ngrok tcp 22 --log=stdout > ngrok-ssh.log &
+          # نفق SSH
+          ngrok tcp 22 --log=stdout > /dev/null &
           
-          # تشغيل نفق HTTP للملفات (المنفذ 8080)
-          echo "🚇 تشغيل نفق HTTP للملفات على المنفذ 8080..."
+          # خادم HTTP
           cd ~/quran-audio/
           python3 -m http.server 8080 > /dev/null 2>&1 &
-          ngrok http 8080 --log=stdout > ngrok-http.log &
           
-          # انتظار تشغيل الأنفاق
-          echo "⏳ جاري تشغيل الأنفاق..."
-          sleep 20
+          # نفق HTTP
+          ngrok http 8080 --log=stdout > /dev/null &
+          
+          sleep 15
+          echo "✅ الأنفاق مشتغلة"
 
-      - name: الحصول على روابط ngrok
+      - name: عرض معلومات الاتصال
         run: |
-          echo ""
-          echo "==========================================="
-          echo "🔥 VPS جاهز للاتصال عن بعد! 🔥"
-          echo "==========================================="
-          echo ""
-          
-          # الحصول على رابط SSH
-          SSH_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -1)
-          if [ ! -z "$SSH_URL" ]; then
-            SSH_HOST=$(echo $SSH_URL | sed 's/tcp:\/\///' | cut -d: -f1)
-            SSH_PORT=$(echo $SSH_URL | sed 's/tcp:\/\///' | cut -d: -f2)
-            
-            echo "🔹 اتصال SSH:"
-            echo "   الأمر: ssh root@$SSH_HOST -p $SSH_PORT"
-            echo "   كلمة المرور: Admin@123"
-            echo ""
-          else
-            echo "❌ فشل في الحصول على رابط SSH"
-          fi
-          
-          # الحصول على رابط HTTP للملفات
-          HTTP_URL=$(curl -s http://127.0.0.1:4041/api/tunnels 2>/dev/null | grep -o 'https://[^"]*' | head -1)
-          if [ -z "$HTTP_URL" ]; then
-            HTTP_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'https://[^"]*' | head -1)
-          fi
-          
-          if [ ! -z "$HTTP_URL" ]; then
-            echo "🔹 رابط تحميل الملفات:"
-            echo "   $HTTP_URL"
-            echo ""
-          else
-            echo "❌ فشل في الحصول على رابط HTTP"
-          fi
-          
-          echo ""
-          echo "==========================================="
-          echo ""
-
-      - name: إنشاء سكربت مساعد للاتصال
-        run: |
-          cd ~
-          
           # الحصول على روابط ngrok
-          SSH_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -1)
-          SSH_HOST=$(echo $SSH_URL | sed 's/tcp:\/\///' | cut -d: -f1)
-          SSH_PORT=$(echo $SSH_URL | sed 's/tcp:\/\///' | cut -d: -f2)
+          SSH_INFO=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -1)
+          HTTP_INFO=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'https://[^"]*' | head -1)
           
-          HTTP_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'https://[^"]*' | head -1)
+          if [ ! -z "$SSH_INFO" ]; then
+            SSH_HOST=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f1)
+            SSH_PORT=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f2)
+          fi
           
-          # إنشاء ملف معلومات
-          cat > connection_info.txt << 'EOF'
-===========================================
-معلومات الاتصال بجهاز VPS
-===========================================
-
-📱 SSH:
-   الأمر: ssh root@___SSH_HOST___ -p ___SSH_PORT___
-   كلمة المرور: Admin@123
-
-🌐 HTTP:
-   الرابط: ___HTTP_URL___
-
-📂 لتحميل الملفات في Termux:
-   cd ~/storage/downloads
-   mkdir quran
-   cd quran
-   
-   for i in 001 078 079 080 081 082 083 084 085 086 087 088 089 090 091 092 093 094 095 096 097 098 099 100 101 102 103 104 105 106 107 108 109 110 111 112 113 114; do
-     wget ___HTTP_URL___/\${i}.mp3
-   done
-
-✅ 38 ملف متاح
-===========================================
-EOF
-
-          # استبدال المتغيرات
-          sed -i "s|___SSH_HOST___|$SSH_HOST|g" connection_info.txt
-          sed -i "s|___SSH_PORT___|$SSH_PORT|g" connection_info.txt
-          sed -i "s|___HTTP_URL___|$HTTP_URL|g" connection_info.txt
+          # عرض المعلومات
+          echo "==========================================="
+          echo "🔥 VPS جاهز للاتصال 🔥"
+          echo "==========================================="
+          echo ""
           
-          echo "📄 تم إنشاء ملف connection_info.txt"
-          cat connection_info.txt
+          if [ ! -z "$SSH_INFO" ]; then
+            echo "📱 SSH:"
+            echo "   ssh root@$SSH_HOST -p $SSH_PORT"
+            echo "   password: Admin@123"
+            echo ""
+          fi
+          
+          if [ ! -z "$HTTP_INFO" ]; then
+            echo "🌐 رابط الملفات:"
+            echo "   $HTTP_INFO"
+            echo ""
+            echo "📥 تحميل مثال:"
+            echo "   wget $HTTP_INFO/001.mp3"
+            echo ""
+          fi
+          
+          echo "⏳ المدة: 6 ساعات"
+          echo "==========================================="
 
       - name: إبقاء الجهاز نشطاً
         run: |
-          # الحصول على الروابط
-          SSH_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -1)
-          SSH_HOST=$(echo $SSH_URL | sed 's/tcp:\/\///' | cut -d: -f1)
-          SSH_PORT=$(echo $SSH_URL | sed 's/tcp:\/\///' | cut -d: -f2)
-          HTTP_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'https://[^"]*' | head -1)
-          
-          START_TIME=$(date +%s)
-          
           while true; do
-            CURRENT_TIME=$(date +%s)
-            ELAPSED=$((CURRENT_TIME - START_TIME))
-            HOURS=$((ELAPSED / 3600))
-            MINUTES=$(( (ELAPSED % 3600) / 60 ))
-            SECONDS=$((ELAPSED % 60))
-            REMAINING=$((21600 - ELAPSED))  # 6 ساعات = 21600 ثانية
-            REMAINING_MIN=$((REMAINING / 60))
-            
-            clear 2>/dev/null || true
-            echo "==========================================="
-            echo "🔥 VPS متاح للاتصال عن بعد 🔥"
-            echo "==========================================="
-            echo ""
-            echo "⏱️  الوقت المنقضي: ${HOURS}h ${MINUTES}m ${SECONDS}s"
-            echo "⏳ الوقت المتبقي: $((REMAINING_MIN / 60))h $((REMAINING_MIN % 60))m"
-            echo ""
-            echo "📱 اتصال SSH:"
-            echo "   ssh root@$SSH_HOST -p $SSH_PORT"
-            echo "   كلمة المرور: Admin@123"
-            echo ""
-            echo "🌐 رابط الملفات:"
-            echo "   $HTTP_URL"
-            echo ""
-            echo "📊 حالة الملفات:"
-            cd ~/quran-audio/ 2>/dev/null
-            MP3_COUNT=$(ls -1 *.mp3 2>/dev/null | wc -l)
-            TOTAL_SIZE=$(du -sh . 2>/dev/null | cut -f1)
-            echo "   الملفات: $MP3_COUNT | الحجم: $TOTAL_SIZE"
-            echo ""
-            echo "📝 مثال تحميل:"
-            echo "   wget $HTTP_URL/001.mp3"
-            echo ""
-            echo "🔄 تحديث كل 30 ثانية"
-            echo "==========================================="
-            
-            sleep 30
+            sleep 300
           done
