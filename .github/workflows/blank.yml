@@ -76,7 +76,7 @@ jobs:
           unzip -o ngrok.zip
           sudo mv ngrok /usr/local/bin/ngrok
           
-          # إضافة التوكن (هذا توكن تجريبي - يفضل استخدام توكنك الخاص)
+          # إضافة التوكن
           ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
           
           echo "✅ تم تثبيت ngrok"
@@ -111,12 +111,9 @@ jobs:
             SSH_HOST=$(echo $SSH_URL | sed 's/tcp:\/\///' | cut -d: -f1)
             SSH_PORT=$(echo $SSH_URL | sed 's/tcp:\/\///' | cut -d: -f2)
             
-            echo "🔹 اتصال SSH (من Termux أو أي جهاز):"
+            echo "🔹 اتصال SSH:"
             echo "   الأمر: ssh root@$SSH_HOST -p $SSH_PORT"
             echo "   كلمة المرور: Admin@123"
-            echo ""
-            echo "   أو استخدم:"
-            echo "   ssh root@$SSH_HOST -p $SSH_PORT"
             echo ""
           else
             echo "❌ فشل في الحصول على رابط SSH"
@@ -129,27 +126,14 @@ jobs:
           fi
           
           if [ ! -z "$HTTP_URL" ]; then
-            echo "🔹 رابط تحميل الملفات الصوتية:"
+            echo "🔹 رابط تحميل الملفات:"
             echo "   $HTTP_URL"
             echo ""
-            echo "   لتحميل ملف معين في Termux:"
-            echo "   wget $HTTP_URL/001.mp3"
-            echo "   wget $HTTP_URL/078.mp3"
-            echo ""
-            echo "   لتحميل كل الملفات:"
-            echo "   for i in 001 078 079 080 081 082 083 084 085 086 087 088 089 090 091 092 093 094 095 096 097 098 099 100 101 102 103 104 105 106 107 108 109 110 111 112 113 114; do"
-            echo "     wget $HTTP_URL/\${i}.mp3"
-            echo "   done"
           else
             echo "❌ فشل في الحصول على رابط HTTP"
           fi
           
           echo ""
-          echo "==========================================="
-          echo "📁 الملفات المتوفرة في ~/quran-audio/:"
-          cd ~/quran-audio/
-          ls -la *.mp3 | head -10
-          echo "... وعشرات الملفات الأخرى"
           echo "==========================================="
           echo ""
 
@@ -165,38 +149,40 @@ jobs:
           HTTP_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'https://[^"]*' | head -1)
           
           # إنشاء ملف معلومات
-          cat > connection_info.txt << EOF
+          cat > connection_info.txt << 'EOF'
 ===========================================
 معلومات الاتصال بجهاز VPS
 ===========================================
 
-📱 SSH (للتحكم الكامل):
-   الأمر: ssh root@$SSH_HOST -p $SSH_PORT
+📱 SSH:
+   الأمر: ssh root@___SSH_HOST___ -p ___SSH_PORT___
    كلمة المرور: Admin@123
 
-🌐 HTTP (لتحميل الملفات):
-   الرابط: $HTTP_URL
+🌐 HTTP:
+   الرابط: ___HTTP_URL___
 
-📂 لتحميل جميع الملفات الصوتية في Termux:
+📂 لتحميل الملفات في Termux:
    cd ~/storage/downloads
    mkdir quran
    cd quran
    
-   # تحميل الملفات
    for i in 001 078 079 080 081 082 083 084 085 086 087 088 089 090 091 092 093 094 095 096 097 098 099 100 101 102 103 104 105 106 107 108 109 110 111 112 113 114; do
-     wget $HTTP_URL/\${i}.mp3
+     wget ___HTTP_URL___/\${i}.mp3
    done
 
-✅ تم تحميل 38 ملف بنجاح!
-
-ملاحظة: هذا الرابط صالح لمدة 6 ساعات
+✅ 38 ملف متاح
 ===========================================
 EOF
 
+          # استبدال المتغيرات
+          sed -i "s|___SSH_HOST___|$SSH_HOST|g" connection_info.txt
+          sed -i "s|___SSH_PORT___|$SSH_PORT|g" connection_info.txt
+          sed -i "s|___HTTP_URL___|$HTTP_URL|g" connection_info.txt
+          
           echo "📄 تم إنشاء ملف connection_info.txt"
           cat connection_info.txt
 
-      - name: إبقاء الجهاز نشطاً وعرض المعلومات
+      - name: إبقاء الجهاز نشطاً
         run: |
           # الحصول على الروابط
           SSH_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -1)
@@ -212,15 +198,16 @@ EOF
             HOURS=$((ELAPSED / 3600))
             MINUTES=$(( (ELAPSED % 3600) / 60 ))
             SECONDS=$((ELAPSED % 60))
-            REMAINING=$((360 - ELAPSED / 60))  # 6 ساعات = 360 دقيقة
+            REMAINING=$((21600 - ELAPSED))  # 6 ساعات = 21600 ثانية
+            REMAINING_MIN=$((REMAINING / 60))
             
-            clear || true
+            clear 2>/dev/null || true
             echo "==========================================="
             echo "🔥 VPS متاح للاتصال عن بعد 🔥"
             echo "==========================================="
             echo ""
             echo "⏱️  الوقت المنقضي: ${HOURS}h ${MINUTES}m ${SECONDS}s"
-            echo "⏳ الوقت المتبقي: $((REMAINING / 60))h $((REMAINING % 60))m"
+            echo "⏳ الوقت المتبقي: $((REMAINING_MIN / 60))h $((REMAINING_MIN % 60))m"
             echo ""
             echo "📱 اتصال SSH:"
             echo "   ssh root@$SSH_HOST -p $SSH_PORT"
@@ -235,10 +222,10 @@ EOF
             TOTAL_SIZE=$(du -sh . 2>/dev/null | cut -f1)
             echo "   الملفات: $MP3_COUNT | الحجم: $TOTAL_SIZE"
             echo ""
-            echo "📝 مثال تحميل في Termux:"
+            echo "📝 مثال تحميل:"
             echo "   wget $HTTP_URL/001.mp3"
             echo ""
-            echo "🔄 سيتم التحديث كل 30 ثانية"
+            echo "🔄 تحديث كل 30 ثانية"
             echo "==========================================="
             
             sleep 30
