@@ -3,133 +3,188 @@ name: تشغيل VPS وتحميل ملفات الصوت
 on:
   push:
     branches:
-      - main  # أو الفرع الذي تستخدمه، مثلاً 'master'
+      - main
 
 jobs:
   vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # سيبقى نشطاً لمدة 6 ساعات
+    timeout-minutes: 360
 
     steps:
       - name: تثبيت الحزم الأساسية
         run: |
           sudo apt update
-          sudo apt install -y curl wget openssh-server
+          sudo apt install -y curl wget openssh-server python3
 
       - name: إعداد وتشغيل SSH
         run: |
-          # إنشاء مجلد SSH
           sudo mkdir -p /var/run/sshd
-
-          # تغيير كلمة مرور root لتسهيل الدخول
           echo "root:Admin@123" | sudo chpasswd
-
-          # السماح بتسجيل الدخول لكلمة المرور
           sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
           sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-
-          # إعادة تشغيل خدمة SSH
           sudo service ssh restart
           echo "تم تشغيل SSH بنجاح."
 
       - name: إنشاء مجلد للملفات الصوتية
         run: |
           mkdir -p ~/quran-audio
-          echo "تم إنشاء مجلد quran-audio في مسار المستخدم."
+          cd ~/quran-audio
+          echo "تم إنشاء مجلد quran-audio"
 
-      - name: تحميل ملفات الصوت (من 001 إلى 114)
+      - name: تحميل ملفات الصوت (المتوفرة فقط)
         run: |
           cd ~/quran-audio
           BASE_URL="https://server12.mp3quran.net/maher/Almusshaf-Al-Mo-lim"
-          echo "بدء تحميل 114 ملف صوتي..."
           
-          # قائمة الملفات المؤكدة الموجودة (بناءً على التحميل الناجح للملف الأول)
-          # سأحاول تحميل كل ملف بشكل مستقل دون إيقاف التشغيل عند فشل أحدهم
+          echo "==========================================="
+          echo "بدء تحميل الملفات المتوفرة..."
+          echo "==========================================="
           
-          # حلقة for لتحميل الملفات من 1 إلى 114
-          for i in $(seq -f "%03g" 1 114); do
-            FILE_NAME="${i}.mp3"
-            URL="${BASE_URL}/${FILE_NAME}"
-            
-            echo "جارٍ محاولة تحميل: ${FILE_NAME}"
-            
-            # التحقق من وجود الملف قبل التحميل (محاولة الحصول على الهيدر فقط)
-            if wget --spider "${URL}" 2>/dev/null; then
-              echo "✅ الملف موجود، جارٍ التحميل..."
-              # تحميل الملف مع تجاهل الأخطاء وعدم إيقاف التشغيل
-              wget -q --show-progress "${URL}" -O "${FILE_NAME}" || echo "⚠️ فشل تحميل ${FILE_NAME} ولكننا سنكمل"
-              
-              if [ -f "${FILE_NAME}" ] && [ -s "${FILE_NAME}" ]; then
-                echo "✅ تم تحميل بنجاح: ${FILE_NAME}"
-              else
-                echo "⚠️ الملف ${FILE_NAME} تم تحميله لكنه فارغ أو ناقص"
-                # حذف الملف الفارغ إن وجد
-                rm -f "${FILE_NAME}"
-              fi
+          # 1. تحميل الملف الأول (001.mp3)
+          echo "تحميل الملف: 001.mp3"
+          wget -q --show-progress "${BASE_URL}/001.mp3" -O "001.mp3"
+          
+          if [ -f "001.mp3" ] && [ -s "001.mp3" ]; then
+            echo "✅ تم تحميل 001.mp3 بنجاح"
+          else
+            echo "❌ فشل تحميل 001.mp3"
+          fi
+          
+          echo ""
+          echo "-------------------------------------------"
+          echo "تحميل الملفات من 078 إلى 114..."
+          echo "-------------------------------------------"
+          
+          # 2. تحميل الملفات من 078 إلى 114
+          SUCCESS_COUNT=0
+          FAIL_COUNT=0
+          
+          for i in $(seq 78 114); do
+            # تنسيق الرقم بثلاثة أرقام (078, 079, ... 114)
+            if [ $i -lt 100 ]; then
+              FILE_NUM="0${i}"
             else
-              echo "⚠️ الملف ${FILE_NAME} غير موجود على الخادم، نتخطاه"
+              FILE_NUM="${i}"
             fi
             
-            # تأخير بسيط بين الطلبات لتجنب حظر الخادم
-            sleep 1
+            FILE_NAME="${FILE_NUM}.mp3"
+            URL="${BASE_URL}/${FILE_NAME}"
+            
+            echo "محاولة تحميل: ${FILE_NAME}"
+            
+            # تحميل الملف مع عرض التقدم
+            if wget -q --show-progress "${URL}" -O "${FILE_NAME}"; then
+              echo "✅ تم تحميل: ${FILE_NAME}"
+              SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+            else
+              echo "❌ فشل تحميل: ${FILE_NAME}"
+              FAIL_COUNT=$((FAIL_COUNT + 1))
+              rm -f "${FILE_NAME}"  # إزالة الملف التالف إن وجد
+            fi
+            
+            echo "-----------------------------------"
+            sleep 1  # تأخير بسيط بين التحميلات
           done
           
           echo ""
           echo "==========================================="
           echo "ملخص التحميل:"
           echo "==========================================="
-          
-          # عرض إحصائيات التحميل
-          TOTAL_FILES=$(ls -1 *.mp3 2>/dev/null | wc -l)
-          if [ "$TOTAL_FILES" -gt 0 ]; then
-            echo "✅ تم تحميل $TOTAL_FILES ملف بنجاح"
-            echo ""
-            echo "الملفات التي تم تحميلها:"
-            ls -la *.mp3 | sort
-          else
-            echo "❌ لم يتم تحميل أي ملف!"
-          fi
-          
+          echo "✅ تم تحميل بنجاح: $((SUCCESS_COUNT + 1)) ملفات"  # +1 للملف 001
+          echo "❌ فشل تحميل: $FAIL_COUNT ملفات"
           echo ""
-          echo "الملفات الموجودة في المجلد:"
-          ls -la ~/quran-audio/
+          echo "الملفات الموجودة حالياً:"
+          ls -la *.mp3 | sort
+          
+          # حساب الحجم الإجمالي
+          TOTAL_SIZE=$(du -sh . | cut -f1)
+          echo ""
+          echo "الحجم الإجمالي للملفات: $TOTAL_SIZE"
 
-      - name: عرض معلومات الإتصال (SSH)
+      - name: عرض معلومات الإتصال
         run: |
+          cd ~/quran-audio/
+          MP3_COUNT=$(ls -1 *.mp3 2>/dev/null | wc -l)
+          TOTAL_SIZE=$(du -sh . 2>/dev/null | cut -f1)
+          
           echo ""
           echo "==========================================="
           echo "✅ جهاز VPS جاهز للاستخدام! ✅"
           echo "==========================================="
           echo ""
           echo "🔹 معلومات الاتصال عبر SSH:"
-          echo "   المضيف: 127.0.0.1 (أو localhost)"
+          echo "   المضيف: 127.0.0.1"
           echo "   المنفذ: 22"
           echo "   المستخدم: root"
           echo "   كلمة المرور: Admin@123"
           echo ""
-          echo "🔹 موقع الملفات الصوتية:"
-          echo "   ~/quran-audio/  (أو /home/runner/quran-audio/)"
+          echo "🔹 معلومات الملفات الصوتية:"
+          echo "   الموقع: ~/quran-audio/"
+          echo "   عدد الملفات: $MP3_COUNT ملف"
+          echo "   الحجم الإجمالي: $TOTAL_SIZE"
           echo ""
-          echo "🔹 عدد الملفات التي تم تحميلها:"
-          cd ~/quran-audio/ && ls -1 *.mp3 2>/dev/null | wc -l || echo "0"
-          echo ""
-          echo "⚠️  ملاحظة: هذا الجهاز يعمل داخل GitHub Actions"
-          echo "    ولا يمكن الاتصال به من الإنترنت مباشرة."
-          echo "==========================================="
+          echo "🔹 الملفات المتوفرة:"
+          echo "   - 001.mp3 (الفاتحة)"
+          echo "   - من 078.mp3 إلى 114.mp3 (من النبأ حتى الناس)"
           echo ""
 
-      - name: إنشاء رابط تحميل للملفات (HTTP Server بسيط)
+      - name: تشغيل خادم HTTP لمشاركة الملفات
         run: |
-          # تشغيل خادم HTTP بسيط لمشاركة الملفات
           cd ~/quran-audio/
+          
+          # إنشاء صفحة HTML بسيطة لعرض الملفات
+          cat > index.html << EOF
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>الملفات الصوتية - القرآن الكريم</title>
+              <meta charset="UTF-8">
+              <style>
+                  body { font-family: Arial; margin: 20px; background: #f5f5f5; }
+                  h1 { color: #2c3e50; }
+                  ul { list-style: none; padding: 0; }
+                  li { 
+                      padding: 10px; 
+                      margin: 5px 0; 
+                      background: white; 
+                      border-radius: 5px;
+                      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                  }
+                  a { 
+                      text-decoration: none; 
+                      color: #3498db; 
+                      font-weight: bold;
+                  }
+                  a:hover { color: #2980b9; }
+                  .count { color: #7f8c8d; font-size: 14px; }
+              </style>
+          </head>
+          <body>
+              <h1>الملفات الصوتية - القرآن الكريم</h1>
+              <p class="count">عدد الملفات: $(ls -1 *.mp3 2>/dev/null | wc -l)</p>
+              <ul>
+          EOF
+          
+          # إضافة روابط الملفات مرتبة
+          for file in $(ls -1 *.mp3 | sort); do
+            size=$(du -h "$file" | cut -f1)
+            echo "<li><a href='/$file'>$file</a> <span style='color:#7f8c8d'>($size)</span></li>" >> index.html
+          done
+          
+          cat >> index.html << EOF
+              </ul>
+          </body>
+          </html>
+          EOF
+          
           echo "✅ تم تشغيل خادم HTTP على المنفذ 8080"
-          echo "   لمشاركة الملفات، استخدم: http://localhost:8080"
+          echo "   لعرض الملفات، افتح: http://localhost:8080"
           echo ""
-          echo "🔗 لتحميل الملفات من جهازك المحلي، تحتاج إلى استخدام ngrok أو خدمة مماثلة:"
-          echo "   ngrok http 8080"
-          echo ""
-          # تشغيل خادم HTTP في الخلفية
+          echo "🔗 لمشاركة الملفات مع العالم الخارجي، استخدم:"
+          echo "   ngrok http 8080  (إذا قمت بتثبيت ngrok)"
+          
+          # تشغيل خادم HTTP
           python3 -m http.server 8080 > /dev/null 2>&1 &
           sleep 2
           echo "✅ خادم HTTP يعمل الآن"
@@ -138,20 +193,31 @@ jobs:
         run: |
           echo ""
           echo "==========================================="
-          echo "🟢 الجهاز يعمل بنشاط - سيتم تحديث الحالة كل دقيقة"
+          echo "🟢 الجهاز يعمل - تحديث كل دقيقة"
           echo "==========================================="
           echo ""
-          COUNTER=0
+          
+          START_TIME=$(date +%s)
+          
           while true; do
-            COUNTER=$((COUNTER + 1))
-            HOURS=$((COUNTER / 60))
-            MINUTES=$((COUNTER % 60))
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+            HOURS=$((ELAPSED / 3600))
+            MINUTES=$(( (ELAPSED % 3600) / 60 ))
+            SECONDS=$((ELAPSED % 60))
             
-            # عرض إحصائيات الملفات
             cd ~/quran-audio/ 2>/dev/null
             MP3_COUNT=$(ls -1 *.mp3 2>/dev/null | wc -l)
-            TOTAL_SIZE=$(du -sh 2>/dev/null | cut -f1)
+            TOTAL_SIZE=$(du -sh . 2>/dev/null | cut -f1)
             
-            echo "[$(date)] - الوقت المنقضي: ${HOURES}h ${MINUTES}m | الملفات: $MP3_COUNT | الحجم: $TOTAL_SIZE"
-            sleep 60  # ينام لمدة دقيقة
+            echo "[$(date)] الوقت المنقضي: ${HOURS}h ${MINUTES}m ${SECONDS}s | الملفات: $MP3_COUNT | الحجم: $TOTAL_SIZE"
+            
+            # عرض آخر 5 ملفات مضافة
+            if [ $MP3_COUNT -gt 0 ]; then
+              LATEST_FILES=$(ls -t *.mp3 2>/dev/null | head -5 | tr '\n' ' ')
+              echo "   آخر الملفات: $LATEST_FILES"
+            fi
+            
+            echo "-----------------------------------"
+            sleep 60
           done
