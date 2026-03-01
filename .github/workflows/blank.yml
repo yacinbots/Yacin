@@ -1,115 +1,100 @@
-name: Ubuntu VPS + VLESS via Ngrok
+name: تشغيل VPS وتحميل ملفات الصوت
 
 on:
   push:
+    branches:
+      - main  # أو الفرع الذي تستخدمه، مثلاً 'master'
 
 jobs:
   vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360  # سيبقى نشطاً لمدة 6 ساعات
 
     steps:
-      - name: Install dependencies
+      - name: تثبيت الحزم الأساسية
         run: |
           sudo apt update
-          sudo apt install -y curl unzip openssh-server
+          sudo apt install -y curl wget openssh-server
 
-      - name: Setup SSH
+      - name: إعداد وتشغيل SSH
         run: |
+          # إنشاء مجلد SSH
           sudo mkdir -p /var/run/sshd
-          echo root:Admin@123 | sudo chpasswd
+
+          # تغيير كلمة مرور root لتسهيل الدخول
+          echo "root:Admin@123" | sudo chpasswd
+
+          # السماح بتسجيل الدخول لكلمة المرور
           sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+          # إعادة تشغيل خدمة SSH
           sudo service ssh restart
+          echo "تم تشغيل SSH بنجاح."
 
-      - name: Install Xray
+      - name: إنشاء مجلد للملفات الصوتية
         run: |
-          sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" install
+          mkdir -p ~/quran-audio
+          echo "تم إنشاء مجلد quran-audio في مسار المستخدم."
 
-      - name: Generate UUID
+      - name: تحميل ملفات الصوت (من 001 إلى 114)
         run: |
-          UUID=$(cat /proc/sys/kernel/random/uuid)
-          echo "UUID=$UUID" >> $GITHUB_ENV
+          cd ~/quran-audio
+          BASE_URL="https://server12.mp3quran.net/maher/Almusshaf-Al-Mo-lim"
+          echo "بدء تحميل 114 ملف صوتي..."
 
-      - name: Configure Xray
+          # حلقة for لتحميل الملفات من 1 إلى 114
+          for i in $(seq -f "%03g" 1 114); do
+            FILE_NAME="${i}.mp3"
+            URL="${BASE_URL}/${FILE_NAME}"
+            
+            echo "جارٍ تحميل: ${FILE_NAME}"
+            
+            # استخدام wget للتحميل، مع الاستمرار في حال فشل رابط معين
+            wget -q --show-progress "${URL}" -O "${FILE_NAME}"
+            
+            if [ $? -eq 0 ]; then
+              echo "✅ تم تحميل: ${FILE_NAME}"
+            else
+              echo "❌ فشل تحميل: ${FILE_NAME} (قد يكون الرابط غير موجود)"
+            fi
+          done
+          
+          echo "تم الانتهاء من محاولة تحميل جميع الملفات."
+          echo "الملفات الموجودة حالياً:"
+          ls -la ~/quran-audio/
+
+      - name: عرض معلومات الإتصال (SSH)
         run: |
-          sudo mkdir -p /usr/local/etc/xray
-          sudo bash -c 'cat > /usr/local/etc/xray/config.json << EOF
-{
-  "inbounds": [
-    {
-      "port": 10000,
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "'"$UUID"'"
-          }
-        ],
-        "decryption": "none"
-      },
-      "streamSettings": {
-        "network": "ws",
-        "wsSettings": {
-          "path": "/dark"
-        }
-      }
-    }
-  ],
-  "outbounds": [
-    {
-      "protocol": "freedom"
-    }
-  ]
-}
-EOF'
-          sudo systemctl restart xray
-          sudo systemctl enable xray
-
-      - name: Install ngrok
-        run: |
-          curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
-          unzip -o ngrok.zip
-          sudo mv ngrok /usr/local/bin/ngrok
-          ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
-
-      - name: Start ngrok tunnel
-        run: |
-          ngrok tcp 10000 --log=stdout > ngrok.log &
-          sleep 15
-
-          URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep public_url | head -n1 | cut -d '"' -f4)
-          HOST=$(echo $URL | sed 's/tcp:\/\///' | cut -d: -f1)
-          PORT=$(echo $URL | sed 's/tcp:\/\///' | cut -d: -f2)
-
-          if [ -z "$HOST" ]; then
-            echo "NGROK FAILED"
-            cat ngrok.log
-            exit 1
-          fi
-
           echo ""
-          echo "================================"
-          echo " VPS READY "
-          echo "================================"
+          echo "==========================================="
+          echo "✅ جهاز VPS جاهز للاستخدام! ✅"
+          echo "==========================================="
           echo ""
-          echo "SSH CONNECTION:"
-          echo "Host: $HOST"
-          echo "Port: $PORT"
-          echo "User: root"
-          echo "Pass: Admin@123"
+          echo "🔹 معلومات الاتصال عبر SSH:"
+          echo "   المضيف: 127.0.0.1 (أو localhost)"
+          echo "   المنفذ: 22"
+          echo "   المستخدم: root"
+          echo "   كلمة المرور: Admin@123"
           echo ""
-          echo "VLESS CONFIG:"
-          echo "Address: $HOST"
-          echo "Port: $PORT"
-          echo "UUID: $UUID"
-          echo "Path: /dark"
-          echo "Network: ws"
+          echo "🔹 موقع الملفات الصوتية:"
+          echo "   ~/quran-audio/  (أو /home/runner/quran-audio/)"
           echo ""
-          echo "VLESS URL:"
-          echo "vless://$UUID@$HOST:$PORT?type=ws&path=%2Fdark&security=none"
-          echo "================================"
+          echo "⚠️  ملاحظة: هذا الجهاز يعمل داخل GitHub Actions"
+          echo "    ولا يمكن الاتصال به من الإنترنت مباشرة إلا إذا قمت بإضافة"
+          echo "    خدمة لعكس الاتصال مثل ngrok أو serveo.net (وهو ما طلبت إزالته)."
+          echo "==========================================="
+          echo ""
 
+      - name: إبقاء الجهاز نشطاً
+        run: |
+          echo "الجهاز سيبقى نشطاً لمدة 6 ساعات. يمكنك إضافة أوامر أخرى هنا."
+          echo "لمحاكاة عمل حقيقي، سيتم تحديث الوقت كل 5 دقائق."
+          while true; do
+            echo "الجهاز لا يزال نشطاً: $(date)"
+            sleep 300  # ينام لمدة 5 دقائق
+          done
       - name: Keep VPS alive
         run: |
           while true; do
