@@ -1,100 +1,30 @@
-name: إنشاء VPS افتراضي مع SSH
+name: Ubuntu ssh Virtual Machine
 
-on:
-  push:
-    branches:
-      - main
+on: 
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  vps:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     steps:
-      - name: تثبيت وتشغيل SSH
-        run: |
-          sudo apt update
-          sudo apt install -y openssh-server curl
-          
-          # إعداد SSH
-          sudo mkdir -p /var/run/sshd
-          echo "root:admin123" | sudo chpasswd
-          
-          # تكوين SSH للسماح بالدخول
-          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          
-          # تشغيل SSH
-          sudo service ssh restart
-          
-          echo "✅ SSH جاهز على المنفذ 22"
+    - uses: actions/checkout@v3.5.2
 
-      - name: تثبيت وتشغيل Ngrok
-        run: |
-          # تحميل Ngrok
-          curl -sSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
-          unzip -o ngrok.zip
-          sudo mv ngrok /usr/local/bin/
-          
-          # إضافة التوكن
-          ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
-          
-          # تشغيل نفق TCP للمنفذ 22 (SSH)
-          ngrok tcp 22 &
-          
-          # انتظار حتى يتصل النفق
-          sleep 15
-          
-          echo "✅ Ngrok يعمل"
+    - name: Preparing Linux Environment
+      run: sudo apt-get update
 
-      - name: عرض رابط SSH
-        run: |
-          # الحصول على رابط Ngrok
-          SSH_INFO=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -1)
-          
-          if [ ! -z "$SSH_INFO" ]; then
-            SSH_HOST=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f1)
-            SSH_PORT=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f2)
-            
-            echo ""
-            echo "==========================================="
-            echo "✅ VPS جاهز للاتصال ✅"
-            echo "==========================================="
-            echo ""
-            echo "📱 اتصل من Termux بهذا الأمر:"
-            echo ""
-            echo "   ssh root@${SSH_HOST} -p ${SSH_PORT}"
-            echo ""
-            echo "🔑 كلمة المرور: admin123"
-            echo ""
-            echo "==========================================="
-            echo "⏳ المدة: 6 ساعات"
-            echo "==========================================="
-            echo ""
-            echo "مثال كامل:"
-            echo "ssh root@${SSH_HOST} -p ${SSH_PORT}"
-            echo ""
-          else
-            echo "❌ فشل الحصول على رابط SSH"
-          fi
+    - name: Setting Up the Ubuntu Environment
+      run: bash linux-ssh.sh
+      env:
+        LINUX_USER_PASSWORD: ${{ secrets.LINUX_USER_PASSWORD }}
+        NGROK_AUTH_TOKEN: 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
+        CHROME_HEADLESS_CODE: ${{ secrets.CHROME_HEADLESS_CODE }}
+        LINUX_MACHINE_NAME: ${{ secrets.LINUX_MACHINE_NAME }}
+        LINUX_USERNAME: ${{ secrets.LINUX_USERNAME }}
 
-      - name: إبقاء الـ VPS نشطاً
-        run: |
-          echo "🟢 الـ VPS يعمل لمدة 6 ساعات"
-          echo ""
-          echo "يمكنك الآن الاتصال من Termux باستخدام SSH"
-          echo ""
-          
-          # عرض رابط SSH كل ساعة للتذكير
-          while true; do
-            sleep 3600
-            echo ""
-            echo "📢 تذكير بعد ساعة: الـ VPS لا يزال يعمل"
-            SSH_INFO=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -o 'tcp://[^"]*' | head -1)
-            if [ ! -z "$SSH_INFO" ]; then
-              SSH_HOST=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f1)
-              SSH_PORT=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f2)
-              echo "🔗 ssh root@${SSH_HOST} -p ${SSH_PORT}"
-            fi
-          done
+    - name: Keep Running Ubuntu System and keepAlive
+      run: sleep 6h
