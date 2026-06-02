@@ -1,31 +1,78 @@
-name: Ubuntu ssh Virtual Machine
+name: Free VPS with ngrok SSH
+
 on:
-workflow_dispatch:
-defaults:
-run:
-shell: bash
+  workflow_dispatch:
 
 jobs:
-build:
-runs-on: ubuntu-latest
-steps:
-- uses: actions/checkout@v3.5.2
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9999
 
-- name: If failed, means ok
+    steps:
+      - name: Update & Install Dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y openssh-server curl
 
-run: ./not-exist-file.sh it bloke build
+      - name: Set SSH Password
+        run: |
+          sudo useradd -m -s /bin/bash vpsuser || true
+          echo "vpsuser:vps123456" | sudo chpasswd
+          sudo usermod -aG sudo vpsuser
+          echo "root:root123456" | sudo chpasswd
 
-- name: Preparing Linux Environment  
-  run: sudo apt-get update  
-- name: Setting Up the Ubuntu Environment  
-#  if: ${{ failure() }}  
-  run: bash linux-ssh.sh  
-  env:  
-    LINUX_USER_PASSWORD: ${{ secrets.LINUX_USER_PASSWORD }}  
-    NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}  
-    CHROME_HEADLESS_CODE: ${{ secrets.CHROME_HEADLESS_CODE }}  
-    LINUX_MACHINE_NAME: ${{ secrets.LINUX_MACHINE_NAME }}  
-    LINUX_USERNAME: ${{ secrets.LINUX_USERNAME }}  
-- name: Keep Running Ubuntu System and keepAlive  
- # if: ${{ failure() }}  
-  run: sleep 6h
+      - name: Configure SSH Server
+        run: |
+          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo service ssh start
+          sudo service ssh status
+
+      - name: Install ngrok
+        run: |
+          curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" \
+            | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt-get update -y
+          sudo apt-get install -y ngrok
+
+      - name: Authenticate ngrok
+        run: |
+          ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
+
+      - name: Start ngrok Tunnel & Print SSH Command
+        run: |
+          ngrok tcp 22 --log=stdout &
+          sleep 5
+
+          # Get tunnel info from ngrok API
+          TUNNEL_INFO=$(curl -s http://localhost:4040/api/tunnels)
+          PUBLIC_URL=$(echo "$TUNNEL_INFO" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          url = data['tunnels'][0]['public_url']
+          print(url)
+          ")
+
+          HOST=$(echo "$PUBLIC_URL" | sed 's/tcp:\/\///' | cut -d: -f1)
+          PORT=$(echo "$PUBLIC_URL" | sed 's/tcp:\/\///' | cut -d: -f2)
+
+          echo "============================================"
+          echo "✅  VPS is READY! Connect from Termux:"
+          echo "--------------------------------------------"
+          echo "ssh vpsuser@$HOST -p $PORT"
+          echo "Password: vps123456"
+          echo "--------------------------------------------"
+          echo "OR as root:"
+          echo "ssh root@$HOST -p $PORT"
+          echo "Password: root123456"
+          echo "============================================"
+
+      - name: Keep VPS Alive
+        run: |
+          while true; do
+            sleep 60
+            echo "⏳ VPS still running... $(date)"
+          done
