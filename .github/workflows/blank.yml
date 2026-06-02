@@ -1,4 +1,4 @@
-name: VLESS + Ngrok لاتصال Dark Tunnel
+name: VLESS + SSH لـ Dark Tunnel و Termux
 
 on:
   push:
@@ -14,17 +14,27 @@ jobs:
       - name: تثبيت الحزم الأساسية
         run: |
           sudo apt update
-          sudo apt install -y curl wget openssh-server unzip jq
+          sudo apt install -y curl wget openssh-server unzip jq python3 openssl
 
-      - name: إعداد وتشغيل SSH
+      - name: إعداد وتشغيل SSH (منفذ 22)
         run: |
           sudo mkdir -p /var/run/sshd
-          echo "root:Admin@123" | sudo chpasswd
+          echo "root:admin123" | sudo chpasswd
           sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
           sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo service ssh restart
-          echo "✅ SSH جاهز"
+          sudo systemctl restart ssh
+          echo "✅ SSH جاهز على المنفذ 22"
+
+      - name: إعداد SSH منفذ إضافي لـ Ngrok
+        run: |
+          # نسخ إعدادات SSH لمنفذ 2222
+          sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config_backup
+          echo "Port 2222" | sudo tee -a /etc/ssh/sshd_config
+          echo "PermitRootLogin yes" | sudo tee -a /etc/ssh/sshd_config
+          echo "PasswordAuthentication yes" | sudo tee -a /etc/ssh/sshd_config
+          sudo systemctl restart ssh
+          echo "✅ SSH أيضاً على المنفذ 2222"
 
       - name: تثبيت Xray-core
         run: |
@@ -34,25 +44,31 @@ jobs:
           sudo mkdir -p /usr/local/etc/xray
           sudo mkdir -p /var/log/xray
           sudo chmod +x /usr/local/bin/xray
-          echo "✅ Xray مثبت"
+          
+          # إنشاء شهادة TLS ذاتية التوقيع
+          openssl req -x509 -newkey rsa:4096 -keyout /tmp/key.pem -out /tmp/cert.pem -days 365 -nodes -subj "/CN=localhost"
+          sudo mv /tmp/key.pem /usr/local/etc/xray/key.pem
+          sudo mv /tmp/cert.pem /usr/local/etc/xray/cert.pem
+          
+          echo "✅ Xray مثبت مع شهادة TLS"
 
-      - name: إعداد ملف إعدادات VLESS
+      - name: إعداد VLESS مع WebSocket + TLS
         run: |
-          cat << 'EOF' | sudo tee /usr/local/etc/xray/config.json
+          UUID="d6b4c3a2-1f0e-4d5c-8b7a-9e6f2c3a4b5d"
+          
+          cat << EOF | sudo tee /usr/local/etc/xray/config.json
           {
             "log": {
-              "loglevel": "warning",
-              "access": "/var/log/xray/access.log",
-              "error": "/var/log/xray/error.log"
+              "loglevel": "warning"
             },
             "inbounds": [
               {
-                "port": 8080,
+                "port": 8443,
                 "protocol": "vless",
                 "settings": {
                   "clients": [
                     {
-                      "id": "d6b4c3a2-1f0e-4d5c-8b7a-9e6f2c3a4b5d",
+                      "id": "${UUID}",
                       "flow": "xtls-rprx-vision"
                     }
                   ],
@@ -60,14 +76,21 @@ jobs:
                 },
                 "streamSettings": {
                   "network": "ws",
-                  "wsSettings": {
-                    "path": "/vless"
+                  "security": "tls",
+                  "tlsSettings": {
+                    "certificates": [
+                      {
+                        "certificateFile": "/usr/local/etc/xray/cert.pem",
+                        "keyFile": "/usr/local/etc/xray/key.pem"
+                      }
+                    ]
                   },
-                  "security": "none"
-                },
-                "sniffing": {
-                  "enabled": true,
-                  "destOverride": ["http", "tls"]
+                  "wsSettings": {
+                    "path": "/vless",
+                    "headers": {
+                      "Host": "localhost"
+                    }
+                  }
                 }
               }
             ],
@@ -79,87 +102,146 @@ jobs:
             ]
           }
           EOF
-          echo "✅ تم إعداد config.json"
+          echo "✅ تم إعداد VLESS مع TLS على المنفذ 8443"
 
-      - name: تشغيل خدمة Xray
+      - name: تشغيل Xray
         run: |
-          sudo /usr/local/bin/xray -c /usr/local/etc/xray/config.json > /dev/null 2>&1 &
-          sleep 3
-          echo "✅ Xray يعمل على المنفذ 8080"
+          sudo /usr/local/bin/xray -c /usr/local/etc/xray/config.json > /var/log/xray.log 2>&1 &
+          sleep 5
+          if pgrep -f "xray" > /dev/null; then
+            echo "✅ Xray يعمل على المنفذ 8443"
+          else
+            echo "❌ فشل تشغيل Xray"
+            cat /var/log/xray.log
+          fi
 
       - name: تثبيت Ngrok
         run: |
-          curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
+          curl -sSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
           unzip -o ngrok.zip
           sudo mv ngrok /usr/local/bin/ngrok
           ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
           echo "✅ Ngrok مثبت"
 
-      - name: تشغيل Ngrok لنفق WebSocket
+      - name: تشغيل أنفاق Ngrok
         run: |
-          ngrok http 8080 --host-header="localhost" --log=stdout > /dev/null 2>&1 &
-          sleep 15
-          echo "✅ Ngrok يعمل"
+          # نفق HTTPS لـ VLESS (منفذ 8443)
+          ngrok http 8443 --host-header="localhost" --log=stdout > /dev/null 2>&1 &
+          
+          # نفق TCP لـ SSH (منفذ 2222)
+          ngrok tcp 2222 --log=stdout > /dev/null 2>&1 &
+          
+          sleep 20
+          echo "✅ الأنفاق مشتغلة"
 
-      - name: إنشاء رابط VLESS لـ Dark Tunnel
+      - name: عرض معلومات الاتصال
         run: |
           sleep 5
           
-          # الحصول على رابط Ngrok
-          NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[] | select(.proto=="https") | .public_url' | head -1)
+          # الحصول على روابط Ngrok
+          TUNNELS=$(curl -s http://127.0.0.1:4040/api/tunnels)
           
-          if [ -z "$NGROK_URL" ]; then
-            NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'https://[^"]*' | head -1)
+          # رابط VLESS (HTTPS)
+          VLESS_URL=$(echo "$TUNNELS" | jq -r '.tunnels[] | select(.proto=="https") | .public_url' | head -1)
+          if [ -z "$VLESS_URL" ]; then
+            VLESS_URL=$(echo "$TUNNELS" | grep -o 'https://[^"]*' | head -1)
           fi
           
-          # استخراج المضيف بدون https://
-          VLESS_HOST=$(echo "$NGROK_URL" | sed 's|https://||')
+          # رابط SSH (TCP)
+          SSH_TCP=$(echo "$TUNNELS" | jq -r '.tunnels[] | select(.proto=="tcp") | .public_url' | head -1)
+          if [ -z "$SSH_TCP" ]; then
+            SSH_TCP=$(echo "$TUNNELS" | grep -o 'tcp://[^"]*' | head -1)
+          fi
           
-          # UUID الخاص
           UUID="d6b4c3a2-1f0e-4d5c-8b7a-9e6f2c3a4b5d"
           
-          # إنشاء رابط VLESS
-          VLESS_LINK="vless://${UUID}@${VLESS_HOST}:443?encryption=none&security=none&type=ws&host=${VLESS_HOST}&path=%2Fvless#GitHub-VLESS"
-          
-          echo "==========================================="
-          echo "🔥 VLESS جاهز للاتصال عبر Dark Tunnel 🔥"
-          echo "==========================================="
-          echo ""
-          echo "📱 معلومات SSH (للطوارئ):"
-          SSH_INFO=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -1)
-          if [ ! -z "$SSH_INFO" ]; then
-            SSH_HOST=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f1)
-            SSH_PORT=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f2)
-            echo "   ssh root@$SSH_HOST -p $SSH_PORT"
-            echo "   password: Admin@123"
+          # معالجة رابط VLESS
+          if [ ! -z "$VLESS_URL" ]; then
+            VLESS_HOST=$(echo "$VLESS_URL" | sed 's|https://||')
+            
+            # رابط VLESS الكامل
+            VLESS_LINK="vless://${UUID}@${VLESS_HOST}:443?encryption=none&security=tls&sni=${VLESS_HOST}&fp=chrome&type=ws&host=${VLESS_HOST}&path=%2Fvless#GitHub-VLESS"
+            
+            echo "==========================================="
+            echo "🔥 VLESS + SSH جاهز للاتصال 🔥"
+            echo "==========================================="
+            echo ""
+            echo "📱 اتصال SSH من Termux:"
+            if [ ! -z "$SSH_TCP" ]; then
+              SSH_HOST=$(echo "$SSH_TCP" | sed 's|tcp://||' | cut -d: -f1)
+              SSH_PORT=$(echo "$SSH_TCP" | sed 's|tcp://||' | cut -d: -f2)
+              echo "   ssh root@${SSH_HOST} -p ${SSH_PORT}"
+              echo "   password: admin123"
+              echo ""
+              echo "   أو استخدم الأمر:"
+              echo "   echo 'admin123' | sshpass -p 0 ssh root@${SSH_HOST} -p ${SSH_PORT}"
+            fi
+            echo ""
+            echo "==========================================="
+            echo "🔗 رابط VLESS لـ Dark Tunnel (انسخ هذا):"
+            echo "==========================================="
+            echo "$VLESS_LINK"
+            echo "==========================================="
+            echo ""
+            echo "📝 إعدادات Dark Tunnel يدوياً:"
+            echo "   النوع: VLESS"
+            echo "   عنوان السيرفر: ${VLESS_HOST}"
+            echo "   المنفذ: 443"
+            echo "   UUID: ${UUID}"
+            echo "   النقل: WebSocket (ws)"
+            echo "   المسار: /vless"
+            echo "   الأمان: TLS"
+            echo "   SNI: ${VLESS_HOST}"
+            echo "==========================================="
+            echo ""
+            echo "⏳ المدة: 6 ساعات"
+            echo "==========================================="
+            
+            # حفظ المعلومات
+            echo "$VLESS_LINK" > ~/vless_link.txt
+            echo "$SSH_TCP" > ~/ssh_link.txt
+            echo "VLESS_LINK=$VLESS_LINK" >> $GITHUB_ENV
+            echo "SSH_LINK=$SSH_TCP" >> $GITHUB_ENV
+          else
+            echo "❌ فشل الحصول على رابط Ngrok"
           fi
-          echo ""
-          echo "==========================================="
-          echo "🔗 رابط VLESS لـ Dark Tunnel (انسخ هذا):"
-          echo "==========================================="
-          echo "$VLESS_LINK"
-          echo "==========================================="
-          echo ""
-          echo "📝 إعدادات Dark Tunnel:"
-          echo "   النوع: VLESS"
-          echo "   عنوان السيرفر: $VLESS_HOST"
-          echo "   المنفذ: 443"
-          echo "   المعرف (UUID): $UUID"
-          echo "   النقل: WebSocket (ws)"
-          echo "   المسار: /vless"
-          echo "   الأمان: none"
-          echo "==========================================="
-          echo ""
-          echo "⏳ المدة: 6 ساعات"
-          echo "==========================================="
+
+      - name: اختبار الاتصال
+        run: |
+          echo "🔄 اختبار الخدمات..."
           
-          # حفظ الرابط في ملف
-          echo "$VLESS_LINK" > ~/vless_link.txt
-          cat ~/vless_link.txt
+          # اختبار Xray
+          if pgrep -f "xray" > /dev/null; then
+            echo "✅ Xray يعمل"
+          else
+            echo "❌ Xray لا يعمل"
+          fi
+          
+          # اختبار SSH
+          if systemctl is-active ssh > /dev/null; then
+            echo "✅ SSH يعمل"
+          else
+            echo "❌ SSH لا يعمل"
+          fi
+          
+          # اختبار Ngrok
+          if pgrep -f "ngrok" > /dev/null; then
+            echo "✅ Ngrok يعمل"
+          else
+            echo "❌ Ngrok لا يعمل"
+          fi
 
       - name: إبقاء الجهاز نشطاً
         run: |
+          echo "🟢 الجهاز يعمل لمدة 6 ساعات"
+          echo "📝 سجل التشغيل:"
           while true; do
             sleep 300
-            echo "💓 الجهاز لا يزال نشط - $(date)"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] الجهاز لا يزال نشطاً"
+            
+            # عرض روابط SSH كل ساعة للتذكير
+            if [ -f ~/ssh_link.txt ]; then
+              SSH_LINK=$(cat ~/ssh_link.txt)
+              echo "🔗 رابط SSH: $SSH_LINK"
+            fi
           done
