@@ -16,50 +16,56 @@ jobs:
           sudo apt update
           sudo apt install -y curl wget openssh-server unzip jq python3 openssl
 
-      - name: إعداد وتشغيل SSH (منفذ 22)
+      - name: إعداد وتشغيل SSH
         run: |
           sudo mkdir -p /var/run/sshd
           echo "root:admin123" | sudo chpasswd
           sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
           sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo systemctl restart ssh
-          echo "✅ SSH جاهز على المنفذ 22"
-
-      - name: إعداد SSH منفذ إضافي لـ Ngrok
-        run: |
-          # نسخ إعدادات SSH لمنفذ 2222
-          sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config_backup
-          echo "Port 2222" | sudo tee -a /etc/ssh/sshd_config
-          echo "PermitRootLogin yes" | sudo tee -a /etc/ssh/sshd_config
-          echo "PasswordAuthentication yes" | sudo tee -a /etc/ssh/sshd_config
-          sudo systemctl restart ssh
-          echo "✅ SSH أيضاً على المنفذ 2222"
+          
+          # إضافة منفذ SSH ثانوي
+          if ! grep -q "Port 2222" /etc/ssh/sshd_config; then
+            echo "Port 2222" | sudo tee -a /etc/ssh/sshd_config
+          fi
+          
+          sudo service ssh restart
+          echo "✅ SSH جاهز على المنافذ 22 و 2222"
 
       - name: تثبيت Xray-core
         run: |
+          cd /tmp
           curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
           unzip -o xray.zip
           sudo mv xray /usr/local/bin/
-          sudo mkdir -p /usr/local/etc/xray
-          sudo mkdir -p /var/log/xray
           sudo chmod +x /usr/local/bin/xray
           
-          # إنشاء شهادة TLS ذاتية التوقيع
+          # إنشاء المجلدات بالصلاحيات الصحيحة
+          sudo mkdir -p /usr/local/etc/xray
+          sudo mkdir -p /var/log/xray
+          sudo chmod 755 /var/log/xray
+          sudo touch /var/log/xray/access.log
+          sudo touch /var/log/xray/error.log
+          sudo chmod 666 /var/log/xray/*.log
+          
+          # إنشاء شهادة TLS
           openssl req -x509 -newkey rsa:4096 -keyout /tmp/key.pem -out /tmp/cert.pem -days 365 -nodes -subj "/CN=localhost"
           sudo mv /tmp/key.pem /usr/local/etc/xray/key.pem
           sudo mv /tmp/cert.pem /usr/local/etc/xray/cert.pem
+          sudo chmod 644 /usr/local/etc/xray/*.pem
           
-          echo "✅ Xray مثبت مع شهادة TLS"
+          echo "✅ Xray مثبت"
 
       - name: إعداد VLESS مع WebSocket + TLS
         run: |
           UUID="d6b4c3a2-1f0e-4d5c-8b7a-9e6f2c3a4b5d"
           
-          cat << EOF | sudo tee /usr/local/etc/xray/config.json
+          sudo tee /usr/local/etc/xray/config.json << EOF
           {
             "log": {
-              "loglevel": "warning"
+              "loglevel": "warning",
+              "access": "/var/log/xray/access.log",
+              "error": "/var/log/xray/error.log"
             },
             "inbounds": [
               {
@@ -102,36 +108,54 @@ jobs:
             ]
           }
           EOF
-          echo "✅ تم إعداد VLESS مع TLS على المنفذ 8443"
+          
+          echo "✅ تم إعداد VLESS"
 
       - name: تشغيل Xray
         run: |
-          sudo /usr/local/bin/xray -c /usr/local/etc/xray/config.json > /var/log/xray.log 2>&1 &
+          # تشغيل Xray في الخلفية
+          sudo /usr/local/bin/xray -c /usr/local/etc/xray/config.json &
+          
+          # انتظار قليلاً
           sleep 5
+          
+          # التحقق من التشغيل
           if pgrep -f "xray" > /dev/null; then
             echo "✅ Xray يعمل على المنفذ 8443"
           else
-            echo "❌ فشل تشغيل Xray"
-            cat /var/log/xray.log
+            echo "⚠️ محاولة تشغيل Xray مرة أخرى..."
+            sudo nohup /usr/local/bin/xray -c /usr/local/etc/xray/config.json > /dev/null 2>&1 &
+            sleep 5
+            if pgrep -f "xray" > /dev/null; then
+              echo "✅ Xray يعمل الآن"
+            else
+              echo "❌ فشل تشغيل Xray"
+              sudo cat /usr/local/etc/xray/config.json
+            fi
           fi
 
       - name: تثبيت Ngrok
         run: |
+          cd /tmp
           curl -sSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
           unzip -o ngrok.zip
-          sudo mv ngrok /usr/local/bin/ngrok
+          sudo mv ngrok /usr/local/bin/
+          sudo chmod +x /usr/local/bin/ngrok
           ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
           echo "✅ Ngrok مثبت"
 
       - name: تشغيل أنفاق Ngrok
         run: |
-          # نفق HTTPS لـ VLESS (منفذ 8443)
-          ngrok http 8443 --host-header="localhost" --log=stdout > /dev/null 2>&1 &
+          # نفق HTTPS لـ VLESS
+          ngrok http 8443 --host-header="localhost" > /dev/null 2>&1 &
           
-          # نفق TCP لـ SSH (منفذ 2222)
-          ngrok tcp 2222 --log=stdout > /dev/null 2>&1 &
+          # نفق TCP لـ SSH
+          ngrok tcp 2222 > /dev/null 2>&1 &
           
+          # انتظار حتى تتصل الأنفاق
+          echo "⏳ انتظار اتصال Ngrok..."
           sleep 20
+          
           echo "✅ الأنفاق مشتغلة"
 
       - name: عرض معلومات الاتصال
@@ -141,107 +165,115 @@ jobs:
           # الحصول على روابط Ngrok
           TUNNELS=$(curl -s http://127.0.0.1:4040/api/tunnels)
           
-          # رابط VLESS (HTTPS)
-          VLESS_URL=$(echo "$TUNNELS" | jq -r '.tunnels[] | select(.proto=="https") | .public_url' | head -1)
+          # رابط VLESS
+          VLESS_URL=$(echo "$TUNNELS" | python3 -c "import sys, json; data=json.load(sys.stdin); tunnels=[t['public_url'] for t in data['tunnels'] if t['proto']=='https']; print(tunnels[0] if tunnels else '')" 2>/dev/null)
           if [ -z "$VLESS_URL" ]; then
-            VLESS_URL=$(echo "$TUNNELS" | grep -o 'https://[^"]*' | head -1)
+            VLESS_URL=$(echo "$TUNNELS" | grep -oE 'https://[a-zA-Z0-9.-]+\.ngrok-free\.app' | head -1)
           fi
           
-          # رابط SSH (TCP)
-          SSH_TCP=$(echo "$TUNNELS" | jq -r '.tunnels[] | select(.proto=="tcp") | .public_url' | head -1)
+          # رابط SSH
+          SSH_TCP=$(echo "$TUNNELS" | python3 -c "import sys, json; data=json.load(sys.stdin); tunnels=[t['public_url'] for t in data['tunnels'] if t['proto']=='tcp']; print(tunnels[0] if tunnels else '')" 2>/dev/null)
           if [ -z "$SSH_TCP" ]; then
-            SSH_TCP=$(echo "$TUNNELS" | grep -o 'tcp://[^"]*' | head -1)
+            SSH_TCP=$(echo "$TUNNELS" | grep -oE 'tcp://[0-9]+\.tcp\.ngrok\.io:[0-9]+' | head -1)
           fi
           
           UUID="d6b4c3a2-1f0e-4d5c-8b7a-9e6f2c3a4b5d"
           
-          # معالجة رابط VLESS
+          echo "==========================================="
+          echo "🔥 VLESS + SSH جاهز للاتصال 🔥"
+          echo "==========================================="
+          echo ""
+          
+          # عرض SSH
+          if [ ! -z "$SSH_TCP" ]; then
+            SSH_HOST=$(echo "$SSH_TCP" | sed 's|tcp://||' | cut -d: -f1)
+            SSH_PORT=$(echo "$SSH_TCP" | sed 's|tcp://||' | cut -d: -f2)
+            echo "📱 اتصال SSH من Termux:"
+            echo "   ssh root@${SSH_HOST} -p ${SSH_PORT}"
+            echo "   password: admin123"
+            echo ""
+            echo "   أو استخدم الأمر المباشر:"
+            echo "   sshpass -p 'admin123' ssh root@${SSH_HOST} -p ${SSH_PORT}"
+            echo ""
+          else
+            echo "⚠️ لم يتم العثور على رابط SSH"
+          fi
+          
+          # عرض VLESS
           if [ ! -z "$VLESS_URL" ]; then
             VLESS_HOST=$(echo "$VLESS_URL" | sed 's|https://||')
             
-            # رابط VLESS الكامل
+            # رابط VLESS
             VLESS_LINK="vless://${UUID}@${VLESS_HOST}:443?encryption=none&security=tls&sni=${VLESS_HOST}&fp=chrome&type=ws&host=${VLESS_HOST}&path=%2Fvless#GitHub-VLESS"
             
             echo "==========================================="
-            echo "🔥 VLESS + SSH جاهز للاتصال 🔥"
-            echo "==========================================="
-            echo ""
-            echo "📱 اتصال SSH من Termux:"
-            if [ ! -z "$SSH_TCP" ]; then
-              SSH_HOST=$(echo "$SSH_TCP" | sed 's|tcp://||' | cut -d: -f1)
-              SSH_PORT=$(echo "$SSH_TCP" | sed 's|tcp://||' | cut -d: -f2)
-              echo "   ssh root@${SSH_HOST} -p ${SSH_PORT}"
-              echo "   password: admin123"
-              echo ""
-              echo "   أو استخدم الأمر:"
-              echo "   echo 'admin123' | sshpass -p 0 ssh root@${SSH_HOST} -p ${SSH_PORT}"
-            fi
-            echo ""
-            echo "==========================================="
-            echo "🔗 رابط VLESS لـ Dark Tunnel (انسخ هذا):"
+            echo "🔗 رابط VLESS لـ Dark Tunnel:"
             echo "==========================================="
             echo "$VLESS_LINK"
             echo "==========================================="
             echo ""
             echo "📝 إعدادات Dark Tunnel يدوياً:"
-            echo "   النوع: VLESS"
-            echo "   عنوان السيرفر: ${VLESS_HOST}"
-            echo "   المنفذ: 443"
-            echo "   UUID: ${UUID}"
-            echo "   النقل: WebSocket (ws)"
-            echo "   المسار: /vless"
-            echo "   الأمان: TLS"
-            echo "   SNI: ${VLESS_HOST}"
-            echo "==========================================="
-            echo ""
-            echo "⏳ المدة: 6 ساعات"
+            echo "   النوع     : VLESS"
+            echo "   السيرفر   : ${VLESS_HOST}"
+            echo "   المنفذ    : 443"
+            echo "   UUID      : ${UUID}"
+            echo "   النقل     : WebSocket (ws)"
+            echo "   المسار    : /vless"
+            echo "   الأمان    : TLS"
+            echo "   SNI       : ${VLESS_HOST}"
             echo "==========================================="
             
-            # حفظ المعلومات
-            echo "$VLESS_LINK" > ~/vless_link.txt
-            echo "$SSH_TCP" > ~/ssh_link.txt
-            echo "VLESS_LINK=$VLESS_LINK" >> $GITHUB_ENV
-            echo "SSH_LINK=$SSH_TCP" >> $GITHUB_ENV
+            # حفظ الرابط
+            echo "$VLESS_LINK" > $HOME/vless_link.txt
           else
-            echo "❌ فشل الحصول على رابط Ngrok"
+            echo "⚠️ لم يتم العثور على رابط VLESS"
+            echo "محاولة بديلة..."
+            
+            # محاولة بديلة للحصول على الرابط
+            NGROK_DOMAINS=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -oE 'ngrok-free\.app' | head -1)
+            if [ ! -z "$NGROK_DOMAINS" ]; then
+              echo "✅ Ngrok يعمل، جرب الانتظار قليلاً ثم أعد المحاولة"
+            fi
           fi
+          
+          echo ""
+          echo "⏳ المدة: 6 ساعات"
+          echo "📂 سيتم عرض الروابط كل ساعة"
+          echo "==========================================="
 
-      - name: اختبار الاتصال
+      - name: إبقاء الجهاز نشطاً مع عرض الروابط
         run: |
-          echo "🔄 اختبار الخدمات..."
+          echo "🟢 بدء التشغيل لمدة 6 ساعات"
           
-          # اختبار Xray
-          if pgrep -f "xray" > /dev/null; then
-            echo "✅ Xray يعمل"
-          else
-            echo "❌ Xray لا يعمل"
-          fi
+          # عرض الروابط كل دقيقة في البداية
+          for i in {1..5}; do
+            sleep 60
+            echo ""
+            echo "=== تحديث $(date) ==="
+            
+            # عرض رابط SSH
+            SSH_TCP=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -oE 'tcp://[0-9]+\.tcp\.ngrok\.io:[0-9]+' | head -1)
+            if [ ! -z "$SSH_TCP" ]; then
+              SSH_HOST=$(echo "$SSH_TCP" | sed 's|tcp://||' | cut -d: -f1)
+              SSH_PORT=$(echo "$SSH_TCP" | sed 's|tcp://||' | cut -d: -f2)
+              echo "🔗 SSH: ssh root@${SSH_HOST} -p ${SSH_PORT} | pass: admin123"
+            fi
+            
+            # عرض رابط VLESS
+            VLESS_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -oE 'https://[a-zA-Z0-9.-]+\.ngrok-free\.app' | head -1)
+            if [ ! -z "$VLESS_URL" ]; then
+              echo "🔗 VLESS متاح على: ${VLESS_URL}"
+            fi
+          done
           
-          # اختبار SSH
-          if systemctl is-active ssh > /dev/null; then
-            echo "✅ SSH يعمل"
-          else
-            echo "❌ SSH لا يعمل"
-          fi
-          
-          # اختبار Ngrok
-          if pgrep -f "ngrok" > /dev/null; then
-            echo "✅ Ngrok يعمل"
-          else
-            echo "❌ Ngrok لا يعمل"
-          fi
-
-      - name: إبقاء الجهاز نشطاً
-        run: |
-          echo "🟢 الجهاز يعمل لمدة 6 ساعات"
-          echo "📝 سجل التشغيل:"
+          # ثم كل 5 دقائق
           while true; do
             sleep 300
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] الجهاز لا يزال نشطاً"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ الجهاز لا يزال نشطاً"
             
-            # عرض روابط SSH كل ساعة للتذكير
-            if [ -f ~/ssh_link.txt ]; then
-              SSH_LINK=$(cat ~/ssh_link.txt)
-              echo "🔗 رابط SSH: $SSH_LINK"
+            # عرض رابط SSH للتذكير
+            SSH_TCP=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -oE 'tcp://[0-9]+\.tcp\.ngrok\.io:[0-9]+' | head -1)
+            if [ ! -z "$SSH_TCP" ]; then
+              echo "🔗 تذكر: للاتصال عبر SSH استخدم: ${SSH_TCP}"
             fi
           done
