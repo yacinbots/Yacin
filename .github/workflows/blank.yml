@@ -1,4 +1,4 @@
-name: VLESS + Cloudflare Tunnel
+name: إنشاء VPS افتراضي مع SSH
 
 on:
   push:
@@ -6,123 +6,95 @@ on:
       - main
 
 jobs:
-  vless:
+  vps:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: تثبيت الحزم
+      - name: تثبيت وتشغيل SSH
         run: |
           sudo apt update
-          sudo apt install -y curl wget openssh-server unzip jq python3 openssl
-
-      - name: إعداد SSH
-        run: |
+          sudo apt install -y openssh-server curl
+          
+          # إعداد SSH
           sudo mkdir -p /var/run/sshd
           echo "root:admin123" | sudo chpasswd
+          
+          # تكوين SSH للسماح بالدخول
           sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          
+          # تشغيل SSH
           sudo service ssh restart
-          echo "✅ SSH جاهز"
+          
+          echo "✅ SSH جاهز على المنفذ 22"
 
-      - name: تثبيت Xray
+      - name: تثبيت وتشغيل Ngrok
         run: |
-          cd /tmp
-          curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
-          unzip -o xray.zip
-          sudo mv xray /usr/local/bin/
-          sudo chmod +x /usr/local/bin/xray
-          sudo mkdir -p /usr/local/etc/xray
+          # تحميل Ngrok
+          curl -sSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -o ngrok.zip
+          unzip -o ngrok.zip
+          sudo mv ngrok /usr/local/bin/
           
-          # إنشاء شهادة TLS بسيطة
-          openssl req -x509 -newkey rsa:4096 -keyout /tmp/key.pem -out /tmp/cert.pem -days 365 -nodes -subj "/CN=localhost"
-          sudo mv /tmp/key.pem /usr/local/etc/xray/key.pem
-          sudo mv /tmp/cert.pem /usr/local/etc/xray/cert.pem
+          # إضافة التوكن
+          ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
           
-          echo "✅ Xray مثبت"
+          # تشغيل نفق TCP للمنفذ 22 (SSH)
+          ngrok tcp 22 &
+          
+          # انتظار حتى يتصل النفق
+          sleep 15
+          
+          echo "✅ Ngrok يعمل"
 
-      - name: إعداد VLESS
+      - name: عرض رابط SSH
         run: |
-          UUID="d6b4c3a2-1f0e-4d5c-8b7a-9e6f2c3a4b5d"
+          # الحصول على رابط Ngrok
+          SSH_INFO=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -1)
           
-          sudo tee /usr/local/etc/xray/config.json << EOF
-          {
-            "inbounds": [
-              {
-                "port": 8080,
-                "protocol": "vless",
-                "settings": {
-                  "clients": [{"id": "${UUID}"}],
-                  "decryption": "none"
-                },
-                "streamSettings": {
-                  "network": "ws",
-                  "wsSettings": {"path": "/vless"}
-                }
-              }
-            ],
-            "outbounds": [{"protocol": "freedom"}]
-          }
-          EOF
-          
-          sudo /usr/local/bin/xray -c /usr/local/etc/xray/config.json &
-          sleep 3
-          echo "✅ VLESS على المنفذ 8080"
-
-      - name: تثبيت Cloudflare Tunnel
-        run: |
-          # تثبيت cloudflared
-          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-          chmod +x cloudflared
-          sudo mv cloudflared /usr/local/bin/
-          echo "✅ Cloudflared مثبت"
-
-      - name: تشغيل Cloudflare Tunnel
-        run: |
-          # تشغيل النفق (بدون حساب - وضع تجريبي)
-          /usr/local/bin/cloudflared tunnel --url http://localhost:8080 --protocol http2 > /tmp/cloudflare.log 2>&1 &
-          
-          sleep 10
-          
-          # استخراج الرابط
-          CLOUDFLARE_URL=$(grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' /tmp/cloudflare.log | head -1)
-          
-          echo "==========================================="
-          echo "🔥 VLESS عبر Cloudflare جاهز 🔥"
-          echo "==========================================="
-          echo ""
-          
-          if [ ! -z "$CLOUDFLARE_URL" ]; then
-            VLESS_HOST=$(echo "$CLOUDFLARE_URL" | sed 's|https://||')
-            UUID="d6b4c3a2-1f0e-4d5c-8b7a-9e6f2c3a4b5d"
+          if [ ! -z "$SSH_INFO" ]; then
+            SSH_HOST=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f1)
+            SSH_PORT=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f2)
             
-            VLESS_LINK="vless://${UUID}@${VLESS_HOST}:443?encryption=none&security=none&type=ws&host=${VLESS_HOST}&path=%2Fvless#VLESS-CF"
-            
-            echo "🔗 رابط VLESS (انسخ هذا):"
-            echo "$VLESS_LINK"
             echo ""
-            echo "📝 أو الإعدادات يدوياً:"
-            echo "   السيرفر: ${VLESS_HOST}"
-            echo "   المنفذ: 443"
-            echo "   UUID: ${UUID}"
-            echo "   المسار: /vless"
-            echo "   النقل: WebSocket"
             echo "==========================================="
+            echo "✅ VPS جاهز للاتصال ✅"
+            echo "==========================================="
+            echo ""
+            echo "📱 اتصل من Termux بهذا الأمر:"
+            echo ""
+            echo "   ssh root@${SSH_HOST} -p ${SSH_PORT}"
+            echo ""
+            echo "🔑 كلمة المرور: admin123"
+            echo ""
+            echo "==========================================="
+            echo "⏳ المدة: 6 ساعات"
+            echo "==========================================="
+            echo ""
+            echo "مثال كامل:"
+            echo "ssh root@${SSH_HOST} -p ${SSH_PORT}"
+            echo ""
           else
-            echo "⚠️ انتظر قليلاً..."
-            sleep 10
-            CLOUDFLARE_URL=$(grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' /tmp/cloudflare.log | head -1)
-            echo "الرابط: $CLOUDFLARE_URL"
+            echo "❌ فشل الحصول على رابط SSH"
           fi
 
-      - name: إبقاء التشغيل
+      - name: إبقاء الـ VPS نشطاً
         run: |
-          echo "🟢 التشغيل لمدة 6 ساعات"
+          echo "🟢 الـ VPS يعمل لمدة 6 ساعات"
           echo ""
-          echo "لمشاهدة الرابط مرة أخرى، افحص هذا الـ log"
+          echo "يمكنك الآن الاتصال من Termux باستخدام SSH"
           echo ""
           
+          # عرض رابط SSH كل ساعة للتذكير
           while true; do
-            sleep 300
-            echo "[$(date)] الجهاز نشط - اعرض الرابط من الأعلى"
+            sleep 3600
+            echo ""
+            echo "📢 تذكير بعد ساعة: الـ VPS لا يزال يعمل"
+            SSH_INFO=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -o 'tcp://[^"]*' | head -1)
+            if [ ! -z "$SSH_INFO" ]; then
+              SSH_HOST=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f1)
+              SSH_PORT=$(echo $SSH_INFO | sed 's/tcp:\/\///' | cut -d: -f2)
+              echo "🔗 ssh root@${SSH_HOST} -p ${SSH_PORT}"
+            fi
           done
