@@ -39,36 +39,20 @@ jobs:
         run: |
           ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
 
-      - name: Start ngrok Tunnels & Print Info
+      - name: Start ngrok & Print SSH Command
         run: |
-          # TCP للـ SSH
-          ngrok tcp 22 --log=stdout > /tmp/ngrok_tcp.log &
-          # HTTP للـ WebSocket/TLS لاحقاً (يعطي HTTPS تلقائي من ngrok)
-          ngrok http 80 --log=stdout > /tmp/ngrok_http.log &
-          sleep 5
+          ngrok tcp 22 --log=stdout > /tmp/ngrok.log &
+          sleep 8
 
           TUNNEL_INFO=$(curl -s http://localhost:4040/api/tunnels)
-
-          TCP_URL=$(echo "$TUNNEL_INFO" | python3 -c "
+          PUBLIC_URL=$(echo "$TUNNEL_INFO" | python3 -c "
           import sys, json
           data = json.load(sys.stdin)
-          for t in data['tunnels']:
-              if t['proto'] == 'tcp':
-                  print(t['public_url'])
-                  break
+          print(data['tunnels'][0]['public_url'])
           ")
 
-          HTTPS_URL=$(echo "$TUNNEL_INFO" | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          for t in data['tunnels']:
-              if t['proto'] == 'https':
-                  print(t['public_url'])
-                  break
-          ")
-
-          SSH_HOST=$(echo "$TCP_URL" | sed 's/tcp:\/\///' | cut -d: -f1)
-          SSH_PORT=$(echo "$TCP_URL" | sed 's/tcp:\/\///' | cut -d: -f2)
+          SSH_HOST=$(echo "$PUBLIC_URL" | sed 's/tcp:\/\///' | cut -d: -f1)
+          SSH_PORT=$(echo "$PUBLIC_URL" | sed 's/tcp:\/\///' | cut -d: -f2)
 
           echo "============================================"
           echo "✅  VPS is READY! Connect from Termux:"
@@ -77,11 +61,8 @@ jobs:
           echo "Password: vps123456"
           echo "--------------------------------------------"
           echo "OR as root:"
-          echo "ssh root@$SSH_HOST -p $PORT"
+          echo "ssh root@$SSH_HOST -p $SSH_PORT"
           echo "Password: root123456"
-          echo "--------------------------------------------"
-          echo "🌐 HTTPS/WS URL (للاستخدام لاحقاً داخل VPS):"
-          echo "$HTTPS_URL"
           echo "============================================"
 
       - name: Keep VPS Alive
