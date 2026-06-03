@@ -1,13 +1,10 @@
 name: Free VPS with ngrok SSH
-
 on:
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 9999
-
     steps:
       - name: Update & Install Dependencies
         run: |
@@ -42,32 +39,49 @@ jobs:
         run: |
           ngrok config add-authtoken 2gzCXiehyX6Dvdjyam6CeA3P7wN_4ZRSp9hHWtNdUrEMfW7A5
 
-      - name: Start ngrok Tunnel & Print SSH Command
+      - name: Start ngrok Tunnels & Print Info
         run: |
-          ngrok tcp 22 --log=stdout &
+          # TCP للـ SSH
+          ngrok tcp 22 --log=stdout > /tmp/ngrok_tcp.log &
+          # HTTP للـ WebSocket/TLS لاحقاً (يعطي HTTPS تلقائي من ngrok)
+          ngrok http 80 --log=stdout > /tmp/ngrok_http.log &
           sleep 5
 
-          # Get tunnel info from ngrok API
           TUNNEL_INFO=$(curl -s http://localhost:4040/api/tunnels)
-          PUBLIC_URL=$(echo "$TUNNEL_INFO" | python3 -c "
+
+          TCP_URL=$(echo "$TUNNEL_INFO" | python3 -c "
           import sys, json
           data = json.load(sys.stdin)
-          url = data['tunnels'][0]['public_url']
-          print(url)
+          for t in data['tunnels']:
+              if t['proto'] == 'tcp':
+                  print(t['public_url'])
+                  break
           ")
 
-          HOST=$(echo "$PUBLIC_URL" | sed 's/tcp:\/\///' | cut -d: -f1)
-          PORT=$(echo "$PUBLIC_URL" | sed 's/tcp:\/\///' | cut -d: -f2)
+          HTTPS_URL=$(echo "$TUNNEL_INFO" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          for t in data['tunnels']:
+              if t['proto'] == 'https':
+                  print(t['public_url'])
+                  break
+          ")
+
+          SSH_HOST=$(echo "$TCP_URL" | sed 's/tcp:\/\///' | cut -d: -f1)
+          SSH_PORT=$(echo "$TCP_URL" | sed 's/tcp:\/\///' | cut -d: -f2)
 
           echo "============================================"
           echo "✅  VPS is READY! Connect from Termux:"
           echo "--------------------------------------------"
-          echo "ssh vpsuser@$HOST -p $PORT"
+          echo "ssh vpsuser@$SSH_HOST -p $SSH_PORT"
           echo "Password: vps123456"
           echo "--------------------------------------------"
           echo "OR as root:"
-          echo "ssh root@$HOST -p $PORT"
+          echo "ssh root@$SSH_HOST -p $PORT"
           echo "Password: root123456"
+          echo "--------------------------------------------"
+          echo "🌐 HTTPS/WS URL (للاستخدام لاحقاً داخل VPS):"
+          echo "$HTTPS_URL"
           echo "============================================"
 
       - name: Keep VPS Alive
